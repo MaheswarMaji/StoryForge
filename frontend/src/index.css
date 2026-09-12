@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 20% 4%;
+    --foreground: 210 40% 98%;
+    --card: 232 30% 9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 232 33% 7%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 38 92% 50%;
+    --primary-foreground: 240 20% 4%;
+    --secondary: 232 25% 14%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 232 22% 13%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 232 25% 15%;
+    --accent-foreground: 38 92% 60%;
+    --destructive: 0 84% 55%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 38 92% 50% / 0.13;
+    --input: 232 22% 16%;
+    --ring: 38 92% 50%;
+    --radius: 0.65rem;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    background-color: #090a0f;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 110% -10%, rgba(30, 27, 75, 0.55), transparent 60%),
+      radial-gradient(ellipse 60% 40% at -10% 110%, rgba(69, 26, 3, 0.35), transparent 60%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background: rgba(245, 158, 11, 0.35);
+  }
+}
+
+/* sleek dark scrollbars */
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-track {
+  background: rgba(18, 20, 31, 0.6);
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(245, 158, 11, 0.25);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 158, 11, 0.45);
+}

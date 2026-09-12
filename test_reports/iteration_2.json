@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 2 focused on newly added auth/admin/instagram/improve/xtts layers. Backend: 30/30 pytest cases pass in 29.9s (auth gating, is_admin flag, admin console 200/403/401, Instagram GET/PUT-fake-creds-400/DELETE, engagement draft-only sync, Improvement Coach 404/409/enqueue+terminal-state with script integrity check, publish IG without creds fails gracefully with 'Instagram not connected', router-status contains xtts/kokoro/qwen_local/procedural, regression endpoints). Direct services.router.tts() run with Hindi text produced 106KB mp3 via 'gemini' provider (dur 2.21s) — free/local fallback chain wired correctly (xtts/kokoro/gtts/openai present). Frontend: /login renders 'Sign in with Google' (data-testid=google-login-button) with no reload loop; with admin cookie /dashboard, /admin (stat cards + Accounts + Channels tables render with 3 accounts, 3 channels), /settings (Instagram Reels 'not connected' form + YouTube Shorts + Model Router Health showing gemini/openai/kokoro/xtts/gtts/qwen_local/procedural/kenburns/fal_flux/fal_wan/replicate), and /stories/6aa57c1eaad23f394fffaa41 (Improvement Coach card with 0/2 rounds used + Run Improvement Coach button, viral score 84 total) all render correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "DashboardPage", "issue": "React console warning persists from iter_1: 'Each child in a list should have a unique key prop. Check the render method of DashboardPage.' Non-blocking but unresolved.", "selector": "DashboardPage list render", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix the missing key prop warning in DashboardPage list render (carry-over from iter_1)."
+  ],
+  "critical_code_review_comments": [
+    "Story id in review request (6aa5425390b47295cfe96a16) does not exist in current DB — used 6aa57c1eaad23f394fffaa41 (approved, 8 chunks) as viable substitute. Main agent should update memory/test_credentials.md to reflect current seed IDs.",
+    "Router-status endpoint: xtts/kokoro/qwen_local/procedural all present as expected. Model Router Health UI on /settings surfaces individual provider status chips cleanly.",
+    "Improvement Coach enqueues cleanly; job reached terminal state within poll window and script chunks (8) remained intact — no rendering-stuck bug observed.",
+    "IG live-Graph validation on PUT /api/settings/instagram returns 400 with detail 'Instagram rejected these credentials …' for FAKE_TOKEN — good wiring.",
+    "Engagement /api/social/engagement/sync draft-only path completes with fetched=0 when no YT/IG creds are stored — no auto-post regression."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (30/30)", "frontend": "100% (all screens render; 1 pre-existing console key-prop warning)"},
+  "test_credentials": "Admin: nyai.deepak@gmail.com (user_id user_fba19a29ab52, role=admin). QA sessions minted directly in Mongo per /app/auth_testing.md; all ephemeral tokens cleaned up post-run.",
+  "seed_data_creation": "None (used existing admin user + existing stories 6aa57c1eaad23f394fffaa41 and 6aa551bf261dd09045c67a16). Test sessions and TEST_ users cleaned after run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py now has 30 cases: TestAuthGating, TestAdminConsole (uses admin_client fixture that mints session for user_fba19a29ab52), TestRouterChains, TestInstagramIntegration, TestEngagement, TestImprovementCoach, TestRegression. Set REACT_APP_BACKEND_URL env before pytest. Story 6aa5425390b47295cfe96a16 mentioned in review does not exist — substituted 6aa57c1eaad23f394fffaa41. If IG publish job runs after improve job on parallel workers, backend_test resets story status to approved before publish test. Provider billing states unchanged (fal.ai/OpenAI/Emergent universal budgets treated as expected-not-a-bug per review). No disk_guard ENOSPC issues observed.",
+  "rca_of_the_issue": "N/A — no critical bugs. Only carry-over cosmetic React key-prop warning on DashboardPage."
+}

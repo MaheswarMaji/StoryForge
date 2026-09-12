@@ -1,0 +1,228 @@
+{
+  "app_name": "StoryForge",
+  "app_description": "AI-Powered Mythology & Folk Story Video Factory — Scanned PDF OCR, LLM story segmentation, 6-beat script generation, Hindi/regional TTS narration, AI image/motion rendering, 9:16 Shorts/Reels video assembly, and automated QA & human approval workflow.",
+  "theme": "Dark Cinematic Cyber-Mythic (Deep Obsidian #090A0F, Warm Sacred Amber #F59E0B, Crimson Flame #EF4444, Mystic Temple Indigo #1E1B4B)",
+  "design_archetype": "THE PERFORMANCE PRO x MYTHIC EDITORIAL (High-density video factory dashboard with rich parchment & glowing jewel-tone accents for folklore storytelling)",
+  "color_palette": {
+    "background": {
+      "primary": "#090A0F",
+      "surface": "#12141F",
+      "surface_elevated": "#1A1D2E",
+      "surface_border": "rgba(245, 158, 11, 0.15)",
+      "overlay": "rgba(9, 10, 15, 0.85)"
+    },
+    "text": {
+      "primary": "#F8FAFC",
+      "secondary": "#94A3B8",
+      "muted": "#64748B",
+      "amber_accent": "#FBBF24"
+    },
+    "narrative_beats_6_colors": {
+      "hook": {
+        "bg": "#451A03",
+        "border": "#D97706",
+        "text": "#FDE68A",
+        "badge": "bg-amber-950/80 text-amber-300 border-amber-600/50",
+        "label": "Hook (0-10s)"
+      },
+      "story": {
+        "bg": "#172554",
+        "border": "#2563EB",
+        "text": "#BFDBFE",
+        "badge": "bg-blue-950/80 text-blue-300 border-blue-600/50",
+        "label": "Story (10-30s)"
+      },
+      "twist": {
+        "bg": "#3B0764",
+        "border": "#9333EA",
+        "text": "#E9D5FF",
+        "badge": "bg-purple-950/80 text-purple-300 border-purple-600/50",
+        "label": "Twist (30-50s)"
+      },
+      "climax": {
+        "bg": "#450A0A",
+        "border": "#DC2626",
+        "text": "#FECACA",
+        "badge": "bg-red-950/80 text-red-300 border-red-600/50",
+        "label": "Climax (50-80s)"
+      },
+      "action": {
+        "bg": "#064E3B",
+        "border": "#059669",
+        "text": "#A7F3D0",
+        "badge": "bg-emerald-950/80 text-emerald-300 border-emerald-600/50",
+        "label": "Action (80-100s)"
+      },
+      "lesson": {
+        "bg": "#134E4A",
+        "border": "#0D9488",
+        "text": "#99F6E4",
+        "badge": "bg-teal-950/80 text-teal-300 border-teal-600/50",
+        "label": "Lesson/Moral (100-120s)"
+      }
+    },
+    "status_badges": {
+      "draft": "bg-slate-800 text-slate-300 border-slate-600",
+      "segmented": "bg-indigo-950 text-indigo-300 border-indigo-700",
+      "scripting": "bg-blue-950 text-blue-300 border-blue-700",
+      "rendering": "bg-amber-950 text-amber-300 border-amber-600 animate-pulse",
+      "qa_review": "bg-purple-950 text-purple-300 border-purple-600",
+      "approved": "bg-emerald-950 text-emerald-300 border-emerald-600",
+      "rejected": "bg-rose-950 text-rose-300 border-rose-600",
+      "published": "bg-cyan-950 text-cyan-300 border-cyan-600"
+    }
+  },
+  "typography": {
+    "heading_font": "Cinematic Serif & Heavy Display Sans (Playfair Display / Serif, bold tight tracking)",
+    "body_font": "Plus Jakarta Sans / Inter for crisp dashboard UI",
+    "script_mono_font": "JetBrains Mono / Fira Code for prompt & metadata editing",
+    "scale": {
+      "h1": "text-3xl lg:text-4xl font-extrabold tracking-tight text-slate-100",
+      "h2": "text-2xl font-bold tracking-tight text-slate-100",
+      "h3": "text-lg font-semibold text-amber-400",
+      "body": "text-sm text-slate-300 leading-relaxed",
+      "caption": "text-xs text-slate-400 font-mono"
+    }
+  },
+  "layout_architecture": {
+    "global_nav": {
+      "type": "Sidebar & Header Hybrid",
+      "sidebar_width": "w-64",
+      "sidebar_links": [
+        {"label": "Production Dashboard", "path": "/dashboard", "icon": "LayoutDashboard"},
+        {"label": "PDF Upload & OCR", "path": "/upload", "icon": "UploadCloud"},
+        {"label": "Books & Story Library", "path": "/stories", "icon": "BookOpen"},
+        {"label": "Video Factory Studio", "path": "/factory/story-1", "icon": "Video"},
+        {"label": "Channels & Settings", "path": "/settings", "icon": "Sliders"}
+      ],
+      "header_elements": [
+        "Channel Switcher Dropdown (Channel 1: 'Mythic Shorts - Dramatic' vs Channel 2: 'Folk Tales - Whimsical')",
+        "Active Worker Status Pill (3 GPU Workers Idle, 2 Jobs Rendering)",
+        "API Credit & Monthly Budget Cost Counter ($42.80 / $100.00)",
+        "Quick PDF Upload Trigger Button"
+      ]
+    },
+    "key_views": {
+      "production_dashboard": {
+        "components": [
+          "Status Funnel Bar & Pipeline Tracker (Draft -> Segmented -> Scripting -> Audio/Video Gen -> QA -> Approved -> Published)",
+          "API Cost Breakdown Charts (LLM vs OCR vs TTS vs Image/Motion Gen via Recharts)",
+          "Job Queue Health Monitor (Active Rendering Jobs, Worker Latency, GPU Utilization, Retry Queue)",
+          "Recent Story Projects Grid with Instant Play Preview & QA Score Badges"
+        ]
+      },
+      "pdf_upload_ocr": {
+        "components": [
+          "Drag-and-Drop Zone supporting scanned PDF files",
+          "Language Selector Checkboxes (Bengali, Hindi/Devanagari, English)",
+          "OCR Extraction Progress Bar & Live Tesseract/Vision LLM Log Console",
+          "Extracted Book Metadata Form (Book Title, Author, Primary Language, Region/Culture)"
+        ]
+      },
+      "books_and_stories": {
+        "components": [
+          "Book Collection Grid & Extracted Story Segments Table",
+          "Filters: Language (Bengali/Hindi/English), Beat Completeness, Production Status, Channel Assignment",
+          "Batch Actions: Trigger 6-Beat Script Generation, Send to Audio TTS Pipeline, Export PDF Report"
+        ]
+      },
+      "story_factory_detail": {
+        "components": [
+          "Interactive 6-Beat Story Script Editor (Hook, Story, Twist, Climax, Action, Lesson) with color-coded segment cards",
+          "Per-Segment Character Consistency Sheet Drawer (Character prompt anchors, seed IDs, reference tags)",
+          "Per-Segment TTS Audio Player Preview with Hindi/Regional voice selection (OpenAI Emergent Universal Key TTS)",
+          "Per-Segment Visual Prompt & AI Frame Preview with FFmpeg motion settings (Zoom In, Pan Left, Slow Push)",
+          "Integrated 9:16 Video Player with synced narration, background music track, and burned-in subtitle overlay",
+          "Automated LLM QA Report Matrix (Checks: 6 Beat Integrity, Visual Consistency, Narration Pacing, Content Safety, Cultural Accuracy)",
+          "Human Review Workflow Actions Bar (Approve for Export, Request Edits with Segment Commenting, Reject Story)",
+          "Publishing Metadata Studio (Viral YouTube Shorts/Reels Title, Description, Hashtag Generator, Thumbnail Selector, 9:16 MP4 Download)"
+        ]
+      },
+      "channels_settings": {
+        "components": [
+          "Channel 1 & Channel 2 Tabbed Configuration Studio",
+          "Voice & Narration Preset Selector (Hindi Deep Epic vs Bengali Warm Folk Narrator)",
+          "Background Music Preset Selector & Audio Volume Balance Sliders",
+          "Safety & Guardrails Strictness Controls (Gore/Violence Filter, Mythic Reverence Filter)",
+          "Watermark & Branding Overlay Controls (Logo placement, 9:16 canvas crop rules)"
+        ]
+      }
+    }
+  },
+  "image_urls": {
+    "story_illustrations": [
+      {
+        "url": "https://images.unsplash.com/photo-1719500494935-c1a5e50a3ce9?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwxfHxteXRob2xvZ3klMjBhbmNpZW50JTIwSW5kaWFuJTIwZm9sa2xvcmUlMjBzdG9yeWJvb2slMjBpbGx1c3RyYXRpb258ZW58MHx8fHwxNzg5MjE0NDYxfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Mythical deity fighting winged creature - Hook/Climax segment preview",
+        "category": "story_frame"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1719495851109-efdaf18ae8c2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwyfHxteXRob2xvZ3klMjBhbmNpZW50JTIwSW5kaWFuJTIwZm9sa2xvcmUlMjBzdG9yeWJvb2slMjBpbGx1c3RyYXRpb258ZW58MHx8fHwxNzg5MjE0NDYxfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Archers hunting in night forest - Action beat visual prompt preview",
+        "category": "story_frame"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1719498480901-c5157c4ed522?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwzfHxteXRob2xvZ3klMjBhbmNpZW50JTIwSW5kaWFuJTIwZm9sa2xvcmUlMjBzdG9yeWJvb2slMjBpbGx1c3RyYXRpb258ZW58MHx8fHwxNzg5MjE0NDYxfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Folk tale warriors confronting giant serpent - Twist beat preview",
+        "category": "story_frame"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1771333944082-6379cf753212?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHw0fHxteXRob2xvZ3klMjBhbmNpZW50JTIwSW5kaWFuJTIwZm9sa2xvcmUlMjBzdG9yeWJvb2slMjBpbGx1c3RyYXRpb258ZW58MHx8fHwxNzg5MjE0NDYxfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Sacred garden encounter with demon prince - Story beat preview",
+        "category": "story_frame"
+      }
+    ]
+  },
+  "interactive_components_and_motion": {
+    "framer_motion": {
+      "card_hover": "whileHover={{ y: -2, transition: { duration: 0.2 } }}",
+      "beat_card_expand": "initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}",
+      "progress_pulse": "animate={{ opacity: [0.6, 1, 0.6] }} transition={{ repeat: Infinity, duration: 1.8 }}"
+    },
+    "audio_visualizer": "CSS animated keyframe equalizer bars for TTS segment preview",
+    "video_player_9_16": "Vertical phone viewport frame (360x640) with ffmpeg motion zoom/pan overlay effect and synchronized subtitle captions preview"
+  },
+  "testing_and_accessibility": {
+    "data_testid_convention": "kebab-case, role-based identifiers (e.g. data-testid='upload-pdf-dropzone', data-testid='beat-segment-card-hook', data-testid='approve-story-button')",
+    "required_data_testids": [
+      "nav-dashboard-link",
+      "nav-upload-link",
+      "nav-stories-link",
+      "nav-factory-link",
+      "nav-settings-link",
+      "channel-select-dropdown",
+      "upload-pdf-dropzone",
+      "start-ocr-button",
+      "story-beat-hook",
+      "story-beat-story",
+      "story-beat-twist",
+      "story-beat-climax",
+      "story-beat-action",
+      "story-beat-lesson",
+      "play-segment-audio-button",
+      "regenerate-segment-video-button",
+      "qa-report-accordion",
+      "review-approve-button",
+      "review-reject-button",
+      "review-request-edits-button",
+      "export-shorts-mp4-button"
+    ],
+    "contrast_rules": "Minimum 4.5:1 text contrast ratio over dark obsidian backgrounds. Primary buttons use dark text (#090A0F) over high-contrast Amber (#F59E0B) or Emerald (#10B981) background."
+  },
+  "instructions_to_main_agent": [
+    "Build StoryForge as a rich, multi-view AI video factory web application in JavaScript React.",
+    "Implement the 5 main views: Production Dashboard, PDF Upload & OCR Engine, Books & Extracted Stories Library, Story Factory & Script Studio (with 6 color-coded beats, 9:16 player, TTS preview, QA report, approval workflow, metadata generator), and Channel Settings Editor.",
+    "Ensure all 6 narrative beats (Hook, Story, Twist, Climax, Action, Lesson) are prominently color-coded with badges, audio previews, visual prompts, and motion controls.",
+    "Use Recharts for the API Cost per Video breakdown and Job Queue Health analytics.",
+    "Support two independently configurable channels ('Mythic Shorts - Dramatic' and 'Folk Tales - Whimsical') with channel switcher in the top navigation bar.",
+    "Ensure every interactive button, input, tab, card, and action element includes explicit `data-testid` attributes as specified in testing_and_accessibility.",
+    "Integrate the Unsplash image URLs provided in design_guidelines.json into the video segment previews, thumbnails, and story cards."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": {
+    "avoid_ai_slop": "Do not create generic centered white/gray card layouts. Use deep obsidian dark theme with amber and jewel-tone accents.",
+    "no_universal_transition": "Do not apply transition: all globally. Apply targeted CSS transitions to hover and active states.",
+    "no_center_container": "Do not set text-align: center on root app containers.",
+    "custom_scrollbars": "Ensure sleek dark scrollbars with rounded thumbs and translucent tracks.",
+    "data_testids": "All buttons, tabs, dropdowns, inputs, and status badges MUST have valid kebab-case data-testid attributes."
+  }
+}

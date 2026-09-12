@@ -1,0 +1,43 @@
+{
+  "summary": "End-to-end smoke test of StoryForge complete. 11/11 backend pytest cases pass (dashboard, router-status, stories list/detail, channels, social/credentials, social youtube auth-url, final MP4 media, thumbnail, audio segment, book OCR status). Frontend: Dashboard, Story Studio (6aa5425390b47295cfe96a16), Story Library, News Desk, Engagement/Social, Channels/Settings and Upload pages all render and function. Full review flow tested: Request Edits -> status flips to 'Edits Requested' + produce-video-cta appears; Approve -> status flips to 'Approved' + publish-panel appears with YouTube+Instagram buttons. Channel voice save round-trip works (gemini:Charon -> gemini:Puck -> back to gemini:Charon, API PATCH 200). Book 6aa57126cf9d4dc77f7ff483 still ocr_running (progress 2%) as expected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "public preview URL", "issue": "Initial test run experienced 3 transient 30s read-timeouts against tale-video-engine.preview.emergentagent.com for /api/dashboard, /api/router-status, /api/stories. Immediate retry succeeded (200 in <200ms). Suggests occasional edge/proxy cold-start latency; internal localhost:8001 is fast (<10ms)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "SocialPage", "issue": "Missing data-testid='social-cred-youtube' on the YouTube credentials status card (the card is rendered and visible, but the testid specified in the review request is absent).", "selector": "[data-testid=\"social-cred-youtube\"]", "priority": "LOW"},
+      {"component": "UploadPage", "issue": "Missing data-testid='dropzone' on the PDF drop area (the dropzone element is rendered and visible with 'Drop a scanned PDF book here', but the testid is absent).", "selector": "[data-testid=\"dropzone\"]", "priority": "LOW"},
+      {"component": "ChannelsPage", "issue": "No user-facing success toast/confirmation observed after saving channel settings (API returns 200, state persists, but DOM does not surface a 'Saved' toast).", "selector": "[data-testid=\"channel-save-button\"]", "priority": "LOW"},
+      {"component": "DashboardPage", "issue": "React console warning: 'Each child in a list should have a unique key prop. Check the render method of DashboardPage.' Non-blocking but should be fixed.", "selector": "DashboardPage list render", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Library curation -> Produce Selected", "issue": "Currently 0 stories are in 'script_ready' state (status_counts: 13 draft, 2 rendering, 1 in_review/approved, 1 failed), so the 'Script Ready' filter yields an empty table and produce-selected-button stays disabled. This is expected behavior given seed data, but the produce-selected flow could not be exercised end-to-end during this run.", "affected_selectors": ["[data-testid=\"library-status-filter\"]", "[data-testid^=\"story-select-\"]", "[data-testid=\"produce-selected-button\"]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Add data-testid='social-cred-youtube' to the YouTube credentials status card on /social.",
+    "Add data-testid='dropzone' to the PDF upload dropzone on /upload.",
+    "Surface a visible success toast after channel settings save on /settings.",
+    "Fix the missing key prop warning in DashboardPage list render (likely jobs-table or recent-stories map).",
+    "Seed at least a few 'script_ready' stories so the Library curation Produce Selected flow can be validated end-to-end.",
+    "(Info) Book 6aa57126cf9d4dc77f7ff483 is still ocr_running at 2% (page cap = 150/run); progress advancement will need another OCR run to complete."
+  ],
+  "critical_code_review_comments": [
+    "Dashboard stat 'stat-stories' shows 0 while /api/stories returns 17 items; label says 'extracted from PDFs' so it likely filters book-derived stories only. Consider clarifying label or exposing a total-stories stat to avoid confusion.",
+    "Review approve button click required scroll-into-view before it registered on first attempt — likely due to sticky footer overlay; consider ensuring the review action bar is not intercepting pointer events when off-viewport.",
+    "No user-facing loading/success/error toast on channel save; per app-wide standard every API call should have success/error UI state."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "~92% (all core flows work; 3 minor testid/UX gaps)"},
+  "test_credentials": "N/A - no auth; per /app/memory/test_credentials.md",
+  "seed_data_creation": "None. Existing seed (story 6aa5425390b47295cfe96a16, book 6aa57126cf9d4dc77f7ff483, news items) used.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 11 pytest cases live in /app/backend/tests/backend_test.py and run under 10s. Story 6aa5425390b47295cfe96a16 was left in status='approved' after review flow; if you need it in 'in_review' or 'edits_requested' again, POST to /api/stories/{id}/review. Book 6aa57126cf9d4dc77f7ff483 still ocr_running at 2%; another OCR run is needed to advance it to segmented. To exercise the Library curation produce-selected flow, first generate scripts on at least 2 draft stories so they reach 'script_ready'.",
+  "rca_of_the_issue": "N/A - no critical bugs. Transient 30s timeouts on public URL were resolved on retry (edge/proxy latency, not an app defect). Minor UX gaps (missing testids, missing toast, key warning) are cosmetic."
+}
