@@ -66,18 +66,46 @@ async def _ollama_json(system: str, prompt: str):
         return parse_json(r.json()["message"]["content"])
 
 
+def hf_key():
+    return (os.environ.get("HF_TOKEN") or "").strip()
+
+
+async def _hf_json(system: str, prompt: str):
+    """Free hosted Qwen via Hugging Face Inference Providers (free monthly credits)."""
+    import httpx
+
+    if not hf_key():
+        raise RuntimeError("HF_TOKEN not set")
+    model = os.environ.get("HF_TEXT_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+    async with httpx.AsyncClient(timeout=120) as client:
+        r = await client.post("https://router.huggingface.co/v1/chat/completions",
+                              headers={"Authorization": f"Bearer {hf_key()}"},
+                              json={"model": model,
+                                    "messages": [{"role": "system", "content": system},
+                                                 {"role": "user", "content": prompt}]})
+        r.raise_for_status()
+        return parse_json(r.json()["choices"][0]["message"]["content"])
+
+
 async def ask_json(system: str, prompt: str, session: str = "job", retries: int = 2,
                    prefer_local: bool = False):
     from services import gemini  # lazy: avoids circular import
     last_err = None
 
-    # 0) local Qwen (Ollama) first for small processing tasks when configured
-    if prefer_local and ollama_url():
-        try:
-            return await _ollama_json(system, prompt)
-        except Exception as e:
-            last_err = e
-            print(f"[llm] ollama chain failed: {str(e)[:120]}", flush=True)
+    # 0) local Qwen (Ollama) first, then free hosted HF Qwen, for small processing tasks
+    if prefer_local:
+        if ollama_url():
+            try:
+                return await _ollama_json(system, prompt)
+            except Exception as e:
+                last_err = e
+                print(f"[llm] ollama chain failed: {str(e)[:120]}", flush=True)
+        if hf_key():
+            try:
+                return await _hf_json(system, prompt)
+            except Exception as e:
+                last_err = e
+                print(f"[llm] hf qwen chain failed: {str(e)[:120]}", flush=True)
 
     # 1) user's Gemini key first (cheapest)
     if gemini.gemini_key():
@@ -109,4 +137,13 @@ async def ask_json(system: str, prompt: str, session: str = "job", retries: int 
                 msg = str(e).lower()
                 if not any(w in msg for w in ("budget", "credit", "quota", "rate", "429", "401", "exceeded")):
                     break
+
+    # 3) free hosted HF Qwen as the last resort
+    if hf_key():
+        try:
+            return await _hf_json(system, prompt)
+        except Exception as e:
+            last_err = e
+            print(f"[llm] hf qwen chain failed: {str(e)[:120]}", flush=True)
+
     raise ValueError(f"LLM call failed: {last_err}")

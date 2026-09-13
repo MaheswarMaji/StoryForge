@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 6 validates HF Qwen 72B free-fallback wiring in services/llm.py. Backend: 9/9 pytest tests PASS (test_iteration6_hf_fallback.py). Live-probed services.llm.ask_json(prefer_local=True) with OLLAMA_BASE_URL unset — returns valid JSON via Hugging Face router (Qwen/Qwen2.5-72B-Instruct) as designed. Normal chain (no prefer_local) also returns valid JSON end-to-end. POST /api/social/engagement/sync enqueues and job reaches terminal state without unhandled crash (engagement triage rides HF Qwen when Gemini 429s). Storyboard produce on 6aa616a70b6da578466afad5 reached in_review within the 240s budget (cached tiles + parallel QA/meta + procedural fallback per iter_5 dead-circuit). Settings vault: GET /api/settings/api-keys shows HF_TOKEN {set:true, hint:'hf_Tnf…'} — masked, no raw leak; PUT/DELETE dummy REPLICATE_API_TOKEN roundtrip works cleanly (used a non-HF slot to avoid clobbering the real HF token). Regression: /api/stories 200, /api/dashboard 200. Frontend verified: /settings shows HF TOKEN row 'active' with hf_Tnf… hint under description 'Hugging Face (free FLUX.1-schnell images)'; /create renders 3 production style cards (Slide-based / AI video clips / Instant storyboard).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/settings/api-keys", "issue": "HF row description in SettingsPage.jsx still says 'Hugging Face (free FLUX.1-schnell images)' — per problem statement HF image inference is DEAD on this token (410 deprecated / 404 router). Since HF is now text-only (free Qwen 72B), the copy is misleading and should be updated to reflect free text LLM fallback."},
+      {"endpoint": "internal", "issue": "No GET /api/jobs/{id} endpoint — only GET /api/jobs (list). Not a blocker; polling works via list, but a per-job endpoint would be cleaner."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration6_hf_fallback.py",
+    "/app/test_reports/pytest/iteration6.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Update HF_TOKEN description in /app/frontend/src/pages/SettingsPage.jsx line 14 from 'Hugging Face (free FLUX.1-schnell images)' to something like 'Hugging Face (free Qwen 72B text fallback)' — reflects reality that HF image inference is deprecated on this token and HF is used only for text LLM fallback."
+  ],
+  "critical_code_review_comments": [
+    "services/llm.py:_hf_json — hardcodes 120s timeout and no retry. HF router occasionally returns 503/524 under load; a single retry with short backoff would improve resilience without hurting the fallback latency budget.",
+    "services/llm.py:ask_json — when prefer_local=True and HF returns bad JSON (parse_json raises), the fallback still walks the cloud chain (gemini→openai→emergent→hf again). That's correct behavior but means one extra HF call at the tail; consider skipping step 3 if step 0 already tried HF.",
+    "SettingsPage.jsx line 14 describes HF as 'free FLUX.1-schnell images' but backend integration is text-only (Qwen 72B) per this iteration's stated reality — copy drift risk.",
+    "routes.py /settings/api-keys hint is os.environ.get(k, '')[:6] + '…' — safe for tokens ≥6 chars but leaks first 6 chars; consider redacting to just prefix + length (e.g., 'hf_***(37)') for tighter opsec. Not a blocker.",
+    "Carry-over open items from iter_5 still apply: dead-circuit is in-memory (not persisted), and DashboardPage React key-prop warning."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration6_hf_fallback.py"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (settings HF row + /create 3 modes verified)"},
+  "test_credentials": "None used. HF_TOKEN comes from backend/.env; never printed in test output or report.",
+  "seed_data_creation": "None. Reused existing story 6aa616a70b6da578466afad5 (cached tiles).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 6 added /app/backend/tests/test_iteration6_hf_fallback.py covering HF Qwen fallback + regressions. Notes for next agent: (a) test_put_and_delete_hf_token in the OLDER backend_test.py IS DESTRUCTIVE — it deletes the real HF_TOKEN from os.environ; if you run the full old suite, expect subsequent LLM prefer_local calls to skip HF until you either PUT the token back or restart backend (backend .env still has it, so restart re-loads). The new iteration6 suite uses REPLICATE_API_TOKEN as the roundtrip slot to avoid this. (b) Produce path on 6aa616a70b6da578466afad5 sometimes needs ~200s under external quota; give it 240s. (c) Engagement job status must be polled via GET /api/jobs?limit=50 and filtered by _id — there is no /api/jobs/{id}. (d) HF image generation is dead on this token (410/404 as stated in problem statement); do not expect any images from HF.",
+  "rca_of_the_issue": "N/A — no bugs found. HF Qwen text fallback works end-to-end: prefer_local=True path returns via hf-qwen with OLLAMA absent; final-resort HF path also correct; settings vault masks HF_TOKEN properly; engagement triage rides the fallback cleanly; storyboard produce unaffected by llm.py changes."
+}
