@@ -11,6 +11,8 @@ HEARTBEAT = {"last_beat": None, "active": 0, "workers": 0}
 HANDLERS = {}
 PRIORITY = {"produce": 0, "publish": 0, "improve": 0, "script": 1, "segment_fix": 1,
             "ocr": 2, "segment": 2, "news": 3, "engagement": 3}
+FAILURE_COLLECTION = {"ocr": "books", "segment": "books", "script": "stories",
+                      "produce": "stories", "segment_fix": "stories"}
 CANCELLED = set()          # job ids cancelled while running (same-process workers)
 QUEUE_PAUSED = {"paused": False}
 
@@ -67,6 +69,42 @@ async def _claim_next(idx: int):
     )
 
 
+async def _execute_job(job, idx):
+    """Run one claimed job to completion and record its terminal status."""
+    job_id = job["_id"]
+    try:
+        HEARTBEAT["active"] += 1
+        HEARTBEAT["last_beat"] = now()
+        handler = HANDLERS.get(job["type"])
+        if not handler:
+            raise RuntimeError(f"no handler for job type {job['type']}")
+
+        async def setp(progress, stage, jid=job_id):
+            await _update(jid, progress=int(progress), stage=stage)
+
+        await handler(job, setp)
+        await _update(job_id, status="done", progress=100, stage="complete", finished_at=now())
+    except JobCancelled:
+        print(f"[queue] job {job_id} cancelled by user", flush=True)
+        await _update(job_id, status="cancelled", stage="stopped by user", finished_at=now())
+        if job.get("ref_id") and job["ref_id"] != "system":
+            await db.stories.update_one(
+                {"_id": job["ref_id"], "status": "rendering"},
+                {"$set": {"status": "script_ready", "stage": "Stopped by user", "error": ""}})
+    except Exception as e:
+        log.exception("job %s failed", job_id)
+        await _update(job_id, status="failed", error=str(e)[:900], finished_at=now())
+        coll = FAILURE_COLLECTION.get(job["type"])
+        if coll and job.get("ref_id") and job["ref_id"] != "system":
+            await db[coll].update_one(
+                {"_id": job["ref_id"]},
+                {"$set": {"status": "failed", "error": str(e)[:500]}},
+            )
+    finally:
+        HEARTBEAT["active"] = max(0, HEARTBEAT["active"] - 1)
+        HEARTBEAT["last_beat"] = now()
+
+
 async def _worker(idx: int):
     while True:
         if QUEUE_PAUSED["paused"]:
@@ -78,39 +116,7 @@ async def _worker(idx: int):
             HEARTBEAT["active"] = 0
             await asyncio.sleep(1.5)
             continue
-        job_id = job["_id"]
-        try:
-            HEARTBEAT["active"] += 1
-            HEARTBEAT["last_beat"] = now()
-            handler = HANDLERS.get(job["type"])
-            if not handler:
-                raise RuntimeError(f"no handler for job type {job['type']}")
-
-            async def setp(progress, stage, jid=job_id):
-                await _update(jid, progress=int(progress), stage=stage)
-
-            await handler(job, setp)
-            await _update(job_id, status="done", progress=100, stage="complete", finished_at=now())
-        except JobCancelled:
-            print(f"[queue] job {job_id} cancelled by user", flush=True)
-            await _update(job_id, status="cancelled", stage="stopped by user", finished_at=now())
-            if job.get("ref_id") and job["ref_id"] != "system":
-                await db.stories.update_one(
-                    {"_id": job["ref_id"], "status": "rendering"},
-                    {"$set": {"status": "script_ready", "stage": "Stopped by user", "error": ""}})
-        except Exception as e:
-            log.exception("job %s failed", job_id)
-            await _update(job_id, status="failed", error=str(e)[:900], finished_at=now())
-            coll = {"ocr": "books", "segment": "books", "script": "stories",
-                    "produce": "stories", "segment_fix": "stories"}.get(job["type"])
-            if coll and job.get("ref_id") and job["ref_id"] != "system":
-                await db[coll].update_one(
-                    {"_id": job["ref_id"]},
-                    {"$set": {"status": "failed", "error": str(e)[:500]}},
-                )
-        finally:
-            HEARTBEAT["active"] = max(0, HEARTBEAT["active"] - 1)
-            HEARTBEAT["last_beat"] = now()
+        await _execute_job(job, idx)
 
 
 async def recover():

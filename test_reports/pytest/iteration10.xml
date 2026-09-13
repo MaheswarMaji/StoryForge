@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="2" failures="5" skipped="0" tests="17" time="20.004" timestamp="2026-09-13T12:53:23.737367+00:00" hostname="agent-env-3d42e885-8686-4272-ad39-a951634a61a1"><testcase classname="" name="tests.test_iteration8_stitch_expressive_yt" time="0.000"><error message="collection failure">backend/tests/test_iteration8_stitch_expressive_yt.py:12: in &lt;module&gt;
+    BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;frozen os&gt;:679: in __getitem__
+    ???
+E   KeyError: 'REACT_APP_BACKEND_URL'</error><error message="collection failure">backend/tests/test_iteration8_stitch_expressive_yt.py:12: in &lt;module&gt;
+    BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;frozen os&gt;:679: in __getitem__
+    ???
+E   KeyError: 'REACT_APP_BACKEND_URL'</error></testcase><testcase classname="tests.test_iteration9_preview_beatsync.TestVoicePreview" name="test_preview_english_kokoro" time="17.141" /><testcase classname="tests.test_iteration9_preview_beatsync.TestRegression" name="test_dashboard_ok" time="0.169" /><testcase classname="tests.test_iteration9_preview_beatsync.TestRegression" name="test_yt_live_unauth_401" time="0.123" /><testcase classname="tests.test_iteration9_preview_beatsync.TestRegression" name="test_prior_stitch_stories_still_in_review[6aa66ac00cdbbc6fd4060168]" time="0.311"><failure message="assert 404 == 200&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_iteration9_preview_beatsync.py:156: in test_prior_stitch_stories_still_in_review
+    assert h.status_code == 200
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="tests.test_iteration9_preview_beatsync.TestRegression" name="test_prior_stitch_stories_still_in_review[6aa66b8558ffb9fdd5448232]" time="0.256"><failure message="assert 404 == 200&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_iteration9_preview_beatsync.py:156: in test_prior_stitch_stories_still_in_review
+    assert h.status_code == 200
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="tests.test_iteration9_preview_beatsync.TestRegression" name="test_prior_stitch_stories_still_in_review[6aa66d2907c6c0f8bc93e391]" time="0.229"><failure message="assert 404 == 200&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_iteration9_preview_beatsync.py:156: in test_prior_stitch_stories_still_in_review
+    assert h.status_code == 200
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="tests.test_iteration9_preview_beatsync.TestRegression" name="test_prior_stitch_stories_still_in_review[6aa6886a2b0899a8dbfe1228]" time="0.264"><failure message="assert 404 == 200&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_iteration9_preview_beatsync.py:156: in test_prior_stitch_stories_still_in_review
+    assert h.status_code == 200
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="tests.test_iteration9_preview_beatsync.TestBeatSyncMath" name="test_action_bpm_snap" time="1.652" /><testcase classname="tests.test_iteration9_preview_beatsync.TestBeatSyncMath" name="test_devotional_bpm_snap" time="0.000" /><testcase classname="tests.test_iteration9_preview_beatsync.TestStitchBeatSync" name="test_stitch_default_beat_sync_true" time="0.725" /><testcase classname="tests.test_iteration9_preview_beatsync.TestStitchBeatSync" name="test_stitch_beat_sync_false_renders_unsnapped" time="0.270"><failure message="assert 404 == 200&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_iteration9_preview_beatsync.py:129: in test_stitch_beat_sync_false_renders_unsnapped
+    assert h.status_code == 200
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="tests.test_iteration9_preview_beatsync.TestVoicePreview" name="test_preview_cached_same_body" time="0.130" /><testcase classname="tests.test_iteration9_preview_beatsync.TestVoicePreview" name="test_preview_different_tone_different_url" time="0.662" /><testcase classname="tests.test_iteration9_preview_beatsync.TestVoicePreview" name="test_preview_bad_voice_falls_through_or_clean_502" time="1.248" /><testcase classname="tests.test_iteration9_preview_beatsync.TestVoicePreview" name="test_preview_no_auth_still_works" time="0.135" /></testsuite></testsuites>

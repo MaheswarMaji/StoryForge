@@ -26,7 +26,7 @@ export default function Layout() {  const { channels, selected, setSelected } = 
   }, []);
 
   const logout = async () => {
-    try { await api.post("/auth/logout"); } catch {}
+    try { await api.post("/auth/logout"); } catch (e) { console.error("logout failed:", e); }
     window.location.href = "/login";
   };
 

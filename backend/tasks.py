@@ -30,7 +30,6 @@ async def run_segment_job(job, setp):
         book.get("filename", ""), full_text, (channel or {}).get("name", "Story channel"))
 
     await setp(70, f"Saving {len(stories)} stories")
-    existing = await db.stories.count_documents({"book_id": book_id})
     n = 0
     for i, s in enumerate(stories[:12]):
         if not isinstance(s, dict) or not (s.get("title_hindi") or s.get("title_english")):
@@ -83,7 +82,6 @@ async def run_script_job(job, setp):
         },
         "updated_at": utcnow(),
     }
-    prev = story.get("cost") or {}
     await db.stories.update_one({"_id": story_id}, {"$set": update, "$inc": {
         "cost.llm": round(cost, 5), "cost.total": round(cost, 5)}})
 

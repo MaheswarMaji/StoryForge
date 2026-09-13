@@ -13,17 +13,108 @@ import { toast } from "sonner";
 
 const fmtSize = (b) => (b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.round((b || 0) / 1e3)} KB`);
 
-export default function CreatePage() {
-  const [types, setTypes] = useState([]);
-  const [title, setTitle] = useState("");
+function TypeGrid({ types, vtype, setVtype }) {
+  return (
+    <div>
+      <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">Video type — sets voice, music &amp; captions automatically</label>
+      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+        {(types || []).map((t) => (
+          <button
+            key={t.key}
+            data-testid={`video-type-${t.key}`}
+            onClick={() => setVtype(t.key)}
+            className={`rounded-xl border p-3.5 text-left transition-colors ${vtype === t.key ? "border-amber-500/60 bg-amber-500/10" : "border-white/10 bg-black/30 hover:border-amber-500/30"}`}
+          >
+            <div className={`text-xs font-bold ${vtype === t.key ? "text-amber-300" : "text-slate-200"}`}>{t.name}</div>
+            <div className="mt-1 text-[10px] leading-relaxed text-slate-500">{t.audience} · {t.language.toUpperCase()} · {t.music_mood} music</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ScriptCreator({ title, types, vtype, setVtype, busy, setBusy }) {
   const [source, setSource] = useState("");
-  const [vtype, setVtype] = useState("mythology_moral");
   const [mode, setMode] = useState("storyboard");
   const [length, setLength] = useState(90);
-  const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState("ai");
+  const navigate = useNavigate();
 
-  // stitch-my-own-media state
+  const submit = async () => {
+    if (!source.trim()) {
+      toast.error("Paste a script or prompt first");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { data } = await api.post("/stories/create", {
+        title, source_text: source, video_type: vtype, length_seconds: length, mode,
+      });
+      toast.success("Script is being written — review it in the Story Studio before rendering");
+      navigate(`/stories/${data.story_id}`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Create failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">Script or prompt *</label>
+        <Textarea data-testid="create-script-textarea" value={source} onChange={(e) => setSource(e.target.value)} rows={8}
+          placeholder={"Paste your full script here…\n\n—or—\n\nJust describe the video: \"A 90-second Hindi short about a poor farmer in Vidarbha whose honesty is rewarded during a drought, ending with a life lesson about integrity.\""}
+          className="border-white/10 bg-black/30 text-sm leading-relaxed text-slate-200" />
+      </div>
+
+      <TypeGrid types={types} vtype={vtype} setVtype={setVtype} />
+
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div>
+          <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">Production style</label>
+          <div className="grid grid-cols-3 gap-2.5">
+            <button data-testid="mode-slide-radio" onClick={() => setMode("slide")}
+              className={`flex flex-col items-center gap-1.5 rounded-xl border p-4 transition-colors ${mode === "slide" ? "border-cyan-500/60 bg-cyan-500/10 text-cyan-200" : "border-white/10 bg-black/30 text-slate-400"}`}>
+              <Images className="h-5 w-5" />
+              <span className="text-xs font-semibold">Slide-based</span>
+              <span className="text-[10px] leading-snug text-slate-500">AI image slides &amp; infographics + narration</span>
+            </button>
+            <button data-testid="mode-clip-radio" onClick={() => setMode("clip")}
+              className={`flex flex-col items-center gap-1.5 rounded-xl border p-4 transition-colors ${mode === "clip" ? "border-fuchsia-500/60 bg-fuchsia-500/10 text-fuchsia-200" : "border-white/10 bg-black/30 text-slate-400"}`}>
+              <Film className="h-5 w-5" />
+              <span className="text-xs font-semibold">AI video clips</span>
+              <span className="text-[10px] leading-snug text-slate-500">Short AI video clips per scene, stitched</span>
+            </button>
+            <button data-testid="mode-storyboard-radio" onClick={() => setMode("storyboard")}
+              className={`flex flex-col items-center gap-1.5 rounded-xl border p-4 transition-colors ${mode === "storyboard" ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-200" : "border-white/10 bg-black/30 text-slate-400"}`}>
+              <LayoutGrid className="h-5 w-5" />
+              <span className="text-xs font-semibold">Instant storyboard</span>
+              <span className="text-[10px] leading-snug text-slate-500">All slides in ONE image, sliced locally — fastest &amp; cheapest</span>
+            </button>
+          </div>
+        </div>
+        <div>
+          <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">Target length: <span className="text-amber-300">{length}s</span></label>
+          <input data-testid="length-slider" type="range" min="30" max="240" step="15" value={length}
+            onChange={(e) => setLength(Number(e.target.value))}
+            className="mt-3 w-full accent-amber-500" />
+          <div className="mt-1 flex justify-between text-[10px] text-slate-500"><span>30s</span><span>2 min</span><span>4 min</span></div>
+        </div>
+      </div>
+
+      <Button data-testid="create-video-button" onClick={submit} disabled={busy} className="w-full bg-amber-500 py-3 font-semibold text-[#090A0F] hover:bg-amber-400">
+        {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+        Write Script &amp; Open Story Studio
+      </Button>
+      <p className="text-[11px] leading-relaxed text-slate-500">
+        Next: review &amp; edit the script in the Story Studio → produce (slides or AI clips, expressive narration, music, captions) → approve → upload to YouTube.
+      </p>
+    </>
+  );
+}
+
+function MediaStitcher({ title, types, vtype, setVtype, busy, setBusy }) {
   const [items, setItems] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [music, setMusic] = useState(true);
@@ -32,10 +123,6 @@ export default function CreatePage() {
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef(null);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    api.get("/video-types").then((r) => setTypes(r.data)).catch(() => {});
-  }, []);
 
   const onFiles = async (fileList) => {
     const files = [...fileList];
@@ -63,26 +150,7 @@ export default function CreatePage() {
     return next;
   });
 
-  const submitAI = async () => {
-    if (!source.trim()) {
-      toast.error("Paste a script or prompt first");
-      return;
-    }
-    setBusy(true);
-    try {
-      const { data } = await api.post("/stories/create", {
-        title, source_text: source, video_type: vtype, length_seconds: length, mode,
-      });
-      toast.success("Script is being written — review it in the Story Studio before rendering");
-      navigate(`/stories/${data.story_id}`);
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Create failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submitStitch = async () => {
+  const submit = async () => {
     if (!items.length) {
       toast.error("Upload at least one image or video clip");
       return;
@@ -102,24 +170,106 @@ export default function CreatePage() {
     }
   };
 
-  const typeGrid = () => (
-    <div>
-      <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">Video type — sets voice, music &amp; captions automatically</label>
-      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-        {(types || []).map((t) => (
-          <button
-            key={t.key}
-            data-testid={`video-type-${t.key}`}
-            onClick={() => setVtype(t.key)}
-            className={`rounded-xl border p-3.5 text-left transition-colors ${vtype === t.key ? "border-amber-500/60 bg-amber-500/10" : "border-white/10 bg-black/30 hover:border-amber-500/30"}`}
-          >
-            <div className={`text-xs font-bold ${vtype === t.key ? "text-amber-300" : "text-slate-200"}`}>{t.name}</div>
-            <div className="mt-1 text-[10px] leading-relaxed text-slate-500">{t.audience} · {t.language.toUpperCase()} · {t.music_mood} music</div>
-          </button>
-        ))}
+  return (
+    <>
+      <div>
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">Your images &amp; video clips</label>
+        <div
+          data-testid="stitch-upload-zone"
+          onClick={() => fileRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }}
+          className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors ${dragOver ? "border-cyan-400 bg-cyan-500/10" : "border-white/15 bg-black/20 hover:border-cyan-500/50"}`}
+        >
+          {uploading ? <Loader2 className="h-7 w-7 animate-spin text-cyan-300" /> : <Plus className="h-7 w-7 text-cyan-300" />}
+          <div className="text-sm font-semibold text-slate-200">{uploading ? "Uploading…" : "Click or drop images / video clips here"}</div>
+          <div className="text-[11px] text-slate-500">JPG · PNG · WebP · MP4 · MOV · WebM — up to 30 items, mixed freely, in any order</div>
+          <input data-testid="stitch-file-input" ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,.avi,.m4v"
+            className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
+        </div>
       </div>
-    </div>
+
+      {items.length > 0 && (
+        <div className="space-y-3">
+          {items.map((it, i) => (
+            <div key={it.media_id} data-testid="stitch-item-row" className="flex flex-wrap items-start gap-3 rounded-xl border border-white/10 bg-black/20 p-3">
+              {it.kind === "video" ? (
+                <video src={it.preview} muted className="h-20 w-12 rounded-lg bg-black object-cover" />
+              ) : (
+                <img src={it.preview} alt="" className="h-20 w-12 rounded-lg bg-black object-cover" />
+              )}
+              <div className="min-w-[180px] flex-1 space-y-2">
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <span className="font-semibold text-slate-200">#{i + 1}</span>
+                  <span className="capitalize">{it.kind}</span>
+                  <span>· {fmtSize(it.size)}</span>
+                  {it.kind === "video" && it.duration ? <span>· {it.duration}s</span> : null}
+                </div>
+                <Textarea data-testid={`stitch-item-narration-${i}`} value={it.narration}
+                  onChange={(e) => setItem(i, { narration: e.target.value })} rows={2}
+                  placeholder="Optional narration for this part — leave empty for silent/music-only playback"
+                  className="border-white/10 bg-black/30 text-xs text-slate-200" />
+                {it.kind === "image" && (
+                  <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                    On screen for
+                    <input data-testid={`stitch-item-duration-${i}`} type="number" min="1" max="20" value={it.dur ?? 4}
+                      onChange={(e) => setItem(i, { dur: Number(e.target.value) })}
+                      className="w-16 rounded-md border border-white/10 bg-black/30 px-2 py-1 text-xs text-slate-200" />
+                    seconds
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <button data-testid={`stitch-item-up-${i}`} onClick={() => moveItem(i, -1)} className="rounded-md border border-white/10 bg-black/30 p-1.5 text-slate-400 hover:text-amber-300"><ArrowUp className="h-3.5 w-3.5" /></button>
+                <button data-testid={`stitch-item-down-${i}`} onClick={() => moveItem(i, 1)} className="rounded-md border border-white/10 bg-black/30 p-1.5 text-slate-400 hover:text-amber-300"><ArrowDown className="h-3.5 w-3.5" /></button>
+                <button data-testid={`stitch-item-remove-${i}`} onClick={() => setItems((s) => s.filter((_, k) => k !== i))} className="rounded-md border border-white/10 bg-black/30 p-1.5 text-slate-400 hover:text-red-400"><X className="h-3.5 w-3.5" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <TypeGrid types={types} vtype={vtype} setVtype={setVtype} />
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-2.5">
+          <Switch data-testid="stitch-music-switch" checked={music} onCheckedChange={setMusic} />
+          <span className="flex items-center gap-2 text-sm text-slate-300"><Music className="h-4 w-4 text-amber-400" /> Background music (mood of the video type)</span>
+        </div>
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-2.5">
+          <Switch data-testid="stitch-endcard-switch" checked={endcard} onCheckedChange={setEndcard} />
+          <span className="text-sm text-slate-300">Subscribe end-card</span>
+        </div>
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-2.5 sm:col-span-2">
+          <Switch data-testid="stitch-beatsync-switch" checked={beatSync} onCheckedChange={setBeatSync} />
+          <span className="text-sm text-slate-300">Cut silent slides on the music's beat — tighter, rhythm-locked reels</span>
+        </div>
+      </div>
+
+      <Button data-testid="stitch-submit-button" onClick={submit} disabled={busy || uploading} className="w-full bg-cyan-500 py-3 font-semibold text-[#090A0F] hover:bg-cyan-400">
+        {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+        Stitch Into One 9:16 Video
+      </Button>
+      <p className="text-[11px] leading-relaxed text-slate-500">
+        Everything is normalized to 1080×1920, reordered exactly as arranged, narrations are voiced (with expressive delivery), music mixed under, captions burned in — then exported ready for Shorts/Reels.
+      </p>
+    </>
   );
+}
+
+export default function CreatePage() {
+  const [types, setTypes] = useState([]);
+  const [title, setTitle] = useState("");
+  const [vtype, setVtype] = useState("mythology_moral");
+  const [tab, setTab] = useState("ai");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    api.get("/video-types").then((r) => { if (live) setTypes(r.data); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
 
   return (
     <div className="mx-auto max-w-5xl space-y-8 pb-16">
@@ -147,144 +297,9 @@ export default function CreatePage() {
           <Input data-testid="create-title-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. The Boy Who Shared His Last Roti" className="border-white/10 bg-black/30 text-slate-200" />
         </div>
 
-        {tab === "ai" ? (
-          <>
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">Script or prompt *</label>
-              <Textarea data-testid="create-script-textarea" value={source} onChange={(e) => setSource(e.target.value)} rows={8}
-                placeholder={"Paste your full script here…\n\n—or—\n\nJust describe the video: \"A 90-second Hindi short about a poor farmer in Vidarbha whose honesty is rewarded during a drought, ending with a life lesson about integrity.\""}
-                className="border-white/10 bg-black/30 text-sm leading-relaxed text-slate-200" />
-            </div>
-
-            {typeGrid()}
-
-            <div className="grid gap-5 sm:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">Production style</label>
-                <div className="grid grid-cols-3 gap-2.5">
-                  <button data-testid="mode-slide-radio" onClick={() => setMode("slide")}
-                    className={`flex flex-col items-center gap-1.5 rounded-xl border p-4 transition-colors ${mode === "slide" ? "border-cyan-500/60 bg-cyan-500/10 text-cyan-200" : "border-white/10 bg-black/30 text-slate-400"}`}>
-                    <Images className="h-5 w-5" />
-                    <span className="text-xs font-semibold">Slide-based</span>
-                    <span className="text-[10px] leading-snug text-slate-500">AI image slides &amp; infographics + narration</span>
-                  </button>
-                  <button data-testid="mode-clip-radio" onClick={() => setMode("clip")}
-                    className={`flex flex-col items-center gap-1.5 rounded-xl border p-4 transition-colors ${mode === "clip" ? "border-fuchsia-500/60 bg-fuchsia-500/10 text-fuchsia-200" : "border-white/10 bg-black/30 text-slate-400"}`}>
-                    <Film className="h-5 w-5" />
-                    <span className="text-xs font-semibold">AI video clips</span>
-                    <span className="text-[10px] leading-snug text-slate-500">Short AI video clips per scene, stitched</span>
-                  </button>
-                  <button data-testid="mode-storyboard-radio" onClick={() => setMode("storyboard")}
-                    className={`flex flex-col items-center gap-1.5 rounded-xl border p-4 transition-colors ${mode === "storyboard" ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-200" : "border-white/10 bg-black/30 text-slate-400"}`}>
-                    <LayoutGrid className="h-5 w-5" />
-                    <span className="text-xs font-semibold">Instant storyboard</span>
-                    <span className="text-[10px] leading-snug text-slate-500">All slides in ONE image, sliced locally — fastest &amp; cheapest</span>
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">Target length: <span className="text-amber-300">{length}s</span></label>
-                <input data-testid="length-slider" type="range" min="30" max="240" step="15" value={length}
-                  onChange={(e) => setLength(Number(e.target.value))}
-                  className="mt-3 w-full accent-amber-500" />
-                <div className="mt-1 flex justify-between text-[10px] text-slate-500"><span>30s</span><span>2 min</span><span>4 min</span></div>
-              </div>
-            </div>
-
-            <Button data-testid="create-video-button" onClick={submitAI} disabled={busy} className="w-full bg-amber-500 py-3 font-semibold text-[#090A0F] hover:bg-amber-400">
-              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-              Write Script &amp; Open Story Studio
-            </Button>
-            <p className="text-[11px] leading-relaxed text-slate-500">
-              Next: review &amp; edit the script in the Story Studio → produce (slides or AI clips, expressive narration, music, captions) → approve → upload to YouTube.
-            </p>
-          </>
-        ) : (
-          <>
-            <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">Your images &amp; video clips</label>
-              <div
-                data-testid="stitch-upload-zone"
-                onClick={() => fileRef.current?.click()}
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(e) => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }}
-                className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors ${dragOver ? "border-cyan-400 bg-cyan-500/10" : "border-white/15 bg-black/20 hover:border-cyan-500/50"}`}
-              >
-                {uploading ? <Loader2 className="h-7 w-7 animate-spin text-cyan-300" /> : <Plus className="h-7 w-7 text-cyan-300" />}
-                <div className="text-sm font-semibold text-slate-200">{uploading ? "Uploading…" : "Click or drop images / video clips here"}</div>
-                <div className="text-[11px] text-slate-500">JPG · PNG · WebP · MP4 · MOV · WebM — up to 30 items, mixed freely, in any order</div>
-                <input data-testid="stitch-file-input" ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,.avi,.m4v"
-                  className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
-              </div>
-            </div>
-
-            {items.length > 0 && (
-              <div className="space-y-3">
-                {items.map((it, i) => (
-                  <div key={it.media_id} data-testid="stitch-item-row" className="flex flex-wrap items-start gap-3 rounded-xl border border-white/10 bg-black/20 p-3">
-                    {it.kind === "video" ? (
-                      <video src={it.preview} muted className="h-20 w-12 rounded-lg bg-black object-cover" />
-                    ) : (
-                      <img src={it.preview} alt="" className="h-20 w-12 rounded-lg bg-black object-cover" />
-                    )}
-                    <div className="min-w-[180px] flex-1 space-y-2">
-                      <div className="flex items-center gap-2 text-xs text-slate-400">
-                        <span className="font-semibold text-slate-200">#{i + 1}</span>
-                        <span className="capitalize">{it.kind}</span>
-                        <span>· {fmtSize(it.size)}</span>
-                        {it.kind === "video" && it.duration ? <span>· {it.duration}s</span> : null}
-                      </div>
-                      <Textarea data-testid={`stitch-item-narration-${i}`} value={it.narration}
-                        onChange={(e) => setItem(i, { narration: e.target.value })} rows={2}
-                        placeholder="Optional narration for this part — leave empty for silent/music-only playback"
-                        className="border-white/10 bg-black/30 text-xs text-slate-200" />
-                      {it.kind === "image" && (
-                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                          On screen for
-                          <input data-testid={`stitch-item-duration-${i}`} type="number" min="1" max="20" value={it.dur ?? 4}
-                            onChange={(e) => setItem(i, { dur: Number(e.target.value) })}
-                            className="w-16 rounded-md border border-white/10 bg-black/30 px-2 py-1 text-xs text-slate-200" />
-                          seconds
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <button data-testid={`stitch-item-up-${i}`} onClick={() => moveItem(i, -1)} className="rounded-md border border-white/10 bg-black/30 p-1.5 text-slate-400 hover:text-amber-300"><ArrowUp className="h-3.5 w-3.5" /></button>
-                      <button data-testid={`stitch-item-down-${i}`} onClick={() => moveItem(i, 1)} className="rounded-md border border-white/10 bg-black/30 p-1.5 text-slate-400 hover:text-amber-300"><ArrowDown className="h-3.5 w-3.5" /></button>
-                      <button data-testid={`stitch-item-remove-${i}`} onClick={() => setItems((s) => s.filter((_, k) => k !== i))} className="rounded-md border border-white/10 bg-black/30 p-1.5 text-slate-400 hover:text-red-400"><X className="h-3.5 w-3.5" /></button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {typeGrid()}
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-2.5">
-                <Switch data-testid="stitch-music-switch" checked={music} onCheckedChange={setMusic} />
-                <span className="flex items-center gap-2 text-sm text-slate-300"><Music className="h-4 w-4 text-amber-400" /> Background music (mood of the video type)</span>
-              </div>
-              <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-2.5">
-                <Switch data-testid="stitch-endcard-switch" checked={endcard} onCheckedChange={setEndcard} />
-                <span className="text-sm text-slate-300">Subscribe end-card</span>
-              </div>
-              <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-2.5 sm:col-span-2">
-                <Switch data-testid="stitch-beatsync-switch" checked={beatSync} onCheckedChange={setBeatSync} />
-                <span className="text-sm text-slate-300">Cut silent slides on the music's beat — tighter, rhythm-locked reels</span>
-              </div>
-            </div>
-
-            <Button data-testid="stitch-submit-button" onClick={submitStitch} disabled={busy || uploading} className="w-full bg-cyan-500 py-3 font-semibold text-[#090A0F] hover:bg-cyan-400">
-              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-              Stitch Into One 9:16 Video
-            </Button>
-            <p className="text-[11px] leading-relaxed text-slate-500">
-              Everything is normalized to 1080×1920, reordered exactly as arranged, narrations are voiced (with expressive delivery), music mixed under, captions burned in — then exported ready for Shorts/Reels.
-            </p>
-          </>
-        )}
+        {tab === "ai"
+          ? <ScriptCreator title={title} types={types} vtype={vtype} setVtype={setVtype} busy={busy} setBusy={setBusy} />
+          : <MediaStitcher title={title} types={types} vtype={vtype} setVtype={setVtype} busy={busy} setBusy={setBusy} />}
       </div>
     </div>
   );

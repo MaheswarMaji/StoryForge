@@ -10,7 +10,20 @@ import pytest
 import requests
 
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
-ADMIN_TOKEN = "qa_admin_test-admin-4447"
+
+
+def _qa_token() -> str:
+    tok = os.environ.get("QA_ADMIN_TOKEN", "").strip()
+    if tok:
+        return tok
+    try:  # the QA session token is documented in the credentials file, never hardcoded here
+        doc = Path("/app/memory/test_credentials.md").read_text()
+        return re.search(r"qa_admin_[A-Za-z0-9\-]+", doc).group(0)
+    except Exception:
+        return ""
+
+
+ADMIN_TOKEN = _qa_token()
 ADMIN_HDR = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
 

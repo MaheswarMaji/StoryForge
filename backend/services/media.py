@@ -477,7 +477,6 @@ def render_endcard(channel_name: str, cta: str, out_png: Path):
 
 
 async def make_endcard_clip(img_png: Path, out: Path, seconds: float = 3.2):
-    frames = round(seconds * FPS)
     await run_ffmpeg(
         "ffmpeg", "-y", "-loop", "1", "-framerate", str(FPS), "-i", str(img_png),
         "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",

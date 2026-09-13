@@ -18,6 +18,10 @@ def _fix(doc):
     return doc
 
 
+def _iso(v):
+    return v.isoformat() if isinstance(v, datetime) else v
+
+
 async def verify_admin(request: Request):
     token = _token_from(request)
     if not token:
@@ -52,28 +56,29 @@ async def _yt_channel():
         return {}
 
 
-@admin_router.get("/overview")
-async def overview(request: Request):
-    await verify_admin(request)
-
+async def _gather_accounts():
     accounts = []
     async for u in db.users.find({}, {"_id": 0}).sort("created_at", 1):
         d = {"user_id": u.get("user_id"), "email": u.get("email"), "name": u.get("name"),
-             "role": u.get("role", "user"), "created_at": u.get("created_at")}
-        if isinstance(d["created_at"], datetime):
-            d["created_at"] = d["created_at"].isoformat()
+             "role": u.get("role", "user"), "created_at": _iso(u.get("created_at"))}
         d["stories"] = await db.stories.count_documents({"owner_id": u["user_id"]})
         accounts.append(d)
+    return accounts
 
+
+async def _gather_channels():
     channels = []
     async for c in db.channels.find().sort("created_at", 1):
         d = _fix(dict(c))
-        if isinstance(d.get("created_at"), datetime):
-            d["created_at"] = d["created_at"].isoformat()
+        d["created_at"] = _iso(d.get("created_at"))
         d["stories"] = await db.stories.count_documents({"channel_id": d["id"]})
         d["published"] = await db.stories.count_documents({"channel_id": d["id"], "status": "published"})
         channels.append(d)
+    return channels
 
+
+async def _gather_published():
+    """Published stories with live platform stats. Returns (rows, views, likes, comments)."""
     published, total_views, total_likes, total_comments = [], 0, 0, 0
     async for s in db.stories.find({"status": "published"}).sort("updated_at", -1).limit(100):
         pub = s.get("publish") or {}
@@ -95,6 +100,16 @@ async def overview(request: Request):
         total_likes += row.get("likes", 0) or 0
         total_comments += row.get("comments", 0) or 0
         published.append(row)
+    return published, total_views, total_likes, total_comments
+
+
+@admin_router.get("/overview")
+async def overview(request: Request):
+    await verify_admin(request)
+
+    accounts = await _gather_accounts()
+    channels = await _gather_channels()
+    published, total_views, total_likes, total_comments = await _gather_published()
 
     cost_agg = await db.stories.aggregate(
         [{"$group": {"_id": None, "total": {"$sum": "$cost.total"}}}]).to_list(1)

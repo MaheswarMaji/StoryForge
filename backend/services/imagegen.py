@@ -90,7 +90,7 @@ async def _gen_gemini_proxy(key, prompt, out_path, ref_image, session):
         if not images:
             raise RuntimeError("no images")
         out_path.write_bytes(base64.b64decode(images[0]["data"]))
-    except Exception as e:
+    except Exception:
         raise
 
 
