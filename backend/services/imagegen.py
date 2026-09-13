@@ -1,10 +1,11 @@
-"""Provider chains: Gemini (user key) -> OpenAI -> Emergent -> procedural fallback."""
+"""AI image providers: Gemini (user key) -> OpenAI -> Stability -> Emergent -> procedural fallback."""
 import asyncio
 import base64
 import os
 from pathlib import Path
 
 from services import gemini
+from services.llm import stability_key, _stability_image
 from services.ocr import MEDIA_ROOT
 
 IMAGE_PRICE = 0.03
@@ -57,6 +58,14 @@ async def generate_image(prompt: str, out_path: Path, ref_image: Path = None, se
             return True
         except Exception as e:
             print(f"[media] openai image failed: {str(e)[:120]}", flush=True)
+
+    if stability_key():
+        try:
+            await asyncio.wait_for(
+                _stability_image(prompt, out_path), timeout=60)
+            return True
+        except Exception as e:
+            print(f"[media] stability image failed: {str(e)[:120]}", flush=True)
 
     _IMAGE_DEAD_UNTIL = time.time() + 600  # all cloud providers dead — stop hammering for 10 min
     await asyncio.to_thread(procedural_frame, prompt, out_path)

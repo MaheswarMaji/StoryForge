@@ -1,7 +1,9 @@
+import asyncio
 import json
 import os
 import re
 import uuid
+from pathlib import Path
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
@@ -68,6 +70,34 @@ async def _ollama_json(system: str, prompt: str):
 
 def hf_key():
     return (os.environ.get("HF_TOKEN") or "").strip()
+
+
+def stability_key():
+    return (os.environ.get("STABILITY_API_KEY") or "").strip()
+
+
+async def _stability_image(prompt: str, out_path, aspect: str = "9:16", model: str = "core") -> bool:
+    """Stability AI (Stable Image Core / SD3.5) — funded real AI images, ~5-15s per call."""
+    import httpx
+
+    key = stability_key()
+    if not key:
+        raise RuntimeError("STABILITY_API_KEY not set")
+    endpoint = "core" if model == "core" else "sd3"
+    fields = {"prompt": prompt[:1900], "output_format": "png", "aspect_ratio": aspect}
+    if model != "core":
+        fields["model"] = model
+    r = await asyncio.to_thread(
+        httpx.post,
+        f"https://api.stability.ai/v2beta/stable-image/generate/{endpoint}",
+        headers={"Authorization": f"Bearer {key}", "Accept": "image/*"},
+        files={k: (None, v) for k, v in fields.items()},
+        timeout=110)
+    if r.status_code == 200 and r.content[:3] in (b"\x89PN", b"\xff\xd8\xff"):
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_bytes(r.content)
+        return True
+    raise RuntimeError(f"stability {endpoint}: {r.status_code} {r.text[:120]}")
 
 
 async def _hf_json(system: str, prompt: str):

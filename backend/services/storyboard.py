@@ -40,8 +40,9 @@ def _wrap(draw, text, font, max_w):
     return lines[:6]
 
 
-def _pil_poster(titles, out_path: Path, rows, cols):
-    """Fully local fallback poster — zero API calls, always works."""
+def _pil_poster(titles, out_path: Path, rows, cols, photos=None):
+    """Free poster: real Pexels photos composited per panel (when available) with dark overlay,
+    headline text and numbered badges — zero AI cost, works always."""
     n = min(len(titles), rows * cols)
     tw, th, pad = 640, 780, 10
     W = cols * tw + (cols + 1) * pad
@@ -53,8 +54,30 @@ def _pil_poster(titles, out_path: Path, rows, cols):
         r, c = divmod(i, cols)
         x0 = pad + c * (tw + pad)
         y0 = pad + r * (th + pad)
-        bg = PALETTE[i % len(PALETTE)]
-        d.rounded_rectangle([x0, y0, x0 + tw, y0 + th], radius=16, fill=bg)
+        px = (photos or [None] * n)[i] if photos else None
+        art = None
+        if px and Path(px).exists():
+            try:
+                art = Image.open(px).convert("RGB")
+                # cover-crop the photo into the panel
+                scale = max(tw / art.width, th / art.height)
+                art = art.resize((int(art.width * scale) + 1, int(art.height * scale) + 1))
+                left = (art.width - tw) // 2
+                top = (art.height - th) // 2
+                img.paste(art.crop((left, top, left + tw, top + th)), (x0, y0))
+            except Exception:
+                art = None
+        if art is None:
+            d.rounded_rectangle([x0, y0, x0 + tw, y0 + th], radius=16, fill=PALETTE[i % len(PALETTE)])
+        else:
+            d.rounded_rectangle([x0, y0, x0 + tw, y0 + th], radius=16, outline="#0B0D16", width=4)
+        # dark gradient overlay for text legibility
+        ov = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+        od = ImageDraw.Draw(ov)
+        for gy in range(th):
+            od.line([(0, gy), (tw, gy)], fill=(0, 0, 0, int(150 * (gy / th) ** 1.3)))
+        img.paste(Image.composite(ov, Image.new("RGBA", (tw, th)), Image.new("L", (tw, th), 255)).convert("RGB"), (x0, y0), ov)
+        d = ImageDraw.Draw(img)
         d.rounded_rectangle([x0 + 16, y0 + 16, x0 + 96, y0 + 60], radius=10, fill="#090A0F")
         d.text((x0 + 38, y0 + 24), str(i + 1), font=f_badge, fill="#FCD34D")
         y = y0 + 78
@@ -128,7 +151,12 @@ async def generate_storyboard(segments, out_dir: Path, style: str, channel: dict
         tmp.replace(poster)
         print("[storyboard] AI poster generated (1 API call)", flush=True)
     else:
-        print("[storyboard] falling back to local PIL poster", flush=True)
-        _pil_poster(titles, poster, rows, cols)
+        # free Pexels photos composited per panel (real photography, no AI cost)
+        from services import pexels
+        photos = await pexels.fetch_photos_for_panels(
+            [f"{t[:80]} india" for t in titles[: rows * cols]], out_dir)
+        print("[storyboard] PIL poster with "
+              f"{sum(1 for p in photos if p)} pexels photos", flush=True)
+        _pil_poster(titles, poster, rows, cols, photos)
 
     return _slice(poster, rows, cols, n, out_dir)

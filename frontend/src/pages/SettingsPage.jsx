@@ -14,6 +14,8 @@ const KEY_LABELS = {
   HF_TOKEN: "Hugging Face (free hosted Qwen-72B text fallback; image API deprecated by HF)",
   FAL_KEY: "fal.ai (FLUX / SDXL / Juggernaut images, Wan / CogVideoX clips)",
   REPLICATE_API_TOKEN: "Replicate (FLUX images, Wan 2.1 clips)",
+  STABILITY_API_KEY: "Stability AI (Stable Image Core / SD3.5 images)",
+  PEXELS_API_KEY: "Pexels (free real photos & video clips — works without AI billing)",
   YOUTUBE_CLIENT_ID: "YouTube OAuth — Client ID",
   YOUTUBE_CLIENT_SECRET: "YouTube OAuth — Client Secret",
   YOUTUBE_REFRESH_TOKEN: "YouTube OAuth — Refresh Token (auto-filled after consent)",
@@ -243,7 +245,6 @@ export default function SettingsPage() {
           <span className="text-[11px] text-slate-500">Default 6h — lower it during launches, raise it to save API quota.</span>
         </div>
       </div>
-
       <div data-testid="router-health-card" className="card-glow rounded-2xl border border-amber-500/10 bg-[#12141F] p-6">
         <div className="mb-4 flex items-center gap-2">
           <ShieldCheck className="h-5 w-5 text-emerald-400" />

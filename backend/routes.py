@@ -564,8 +564,9 @@ async def engagement_sync():
 
 # ---------- integration settings ----------
 ALLOWED_VAULT_KEYS = {"OPENAI_API_KEY", "GEMINI_API_KEY", "EMERGENT_LLM_KEY", "FAL_KEY", "HF_TOKEN",
-                      "REPLICATE_API_TOKEN", "YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET",
-                      "YOUTUBE_REFRESH_TOKEN", "INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_USER_ID"}
+                      "REPLICATE_API_TOKEN", "PEXELS_API_KEY", "STABILITY_API_KEY", "YOUTUBE_CLIENT_ID",
+                      "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN", "INSTAGRAM_ACCESS_TOKEN",
+                      "INSTAGRAM_USER_ID"}
 
 
 @router.get("/settings/api-keys")

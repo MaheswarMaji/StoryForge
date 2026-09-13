@@ -39,8 +39,8 @@ def chain(kind: str) -> list:
     order = {
         "tts": os.environ.get("TTS_PROVIDER_ORDER", "kokoro,xtts,gtts,gemini,openai"),
         "image": os.environ.get("IMAGE_PROVIDER_ORDER",
-                                "openai,hf_flux,fal_flux,replicate_flux,emergent,gemini,qwen_local,procedural"),
-        "video": os.environ.get("VIDEO_PROVIDER_ORDER", "gemini_veo,replicate_wan,fal_wan,kenburns"),
+                                "openai,stability,hf_flux,fal_flux,replicate_flux,emergent,gemini,qwen_local,pexels,procedural"),
+        "video": os.environ.get("VIDEO_PROVIDER_ORDER", "gemini_veo,replicate_wan,fal_wan,pexels_video,kenburns"),
     }
     return [p.strip() for p in order[kind].split(",") if p.strip()]
 
@@ -56,6 +56,7 @@ def status() -> dict:
             "replicate": {"key": bool(_key("REPLICATE_API_TOKEN")), "healthy": available("replicate")},
             "gemini_veo": {"key": bool(_key("GEMINI_API_KEY")), "healthy": available("gemini_veo")},
             "hf_flux": {"key": bool(_key("HF_TOKEN")), "healthy": available("hf_flux")},
+            "stability": {"key": bool(_key("STABILITY_API_KEY")), "healthy": available("stability")},
             "gemini": {"key": bool(_key("GEMINI_API_KEY")), "healthy": available("gemini")},
             "openai": {"key": bool(_key("OPENAI_API_KEY")), "healthy": available("openai")},
             "kokoro": {"key": True, "healthy": available("kokoro")},
@@ -64,6 +65,8 @@ def status() -> dict:
             "procedural": {"key": True, "healthy": True},
             "kenburns": {"key": True, "healthy": True},
             "qwen_local": {"key": True, "healthy": available("qwen_local"), "capable": _qwen_capable()},
+            "pexels": {"key": bool(_key("PEXELS_API_KEY")), "healthy": True},
+            "pexels_video": {"key": bool(_key("PEXELS_API_KEY")), "healthy": True},
         },
         "notes": "Slide mode image priority: OpenAI → Hugging Face FLUX.1-schnell → fal.ai. Clip mode video priority: Gemini Veo → Replicate (Wan 2.1) → fal.ai. Free local fallbacks (Kokoro/XTTS/gTTS voice, procedural frames + Ken Burns) always available. Add HF_TOKEN / FAL_KEY / REPLICATE_API_TOKEN in Settings → API Keys.",
     }
@@ -232,6 +235,18 @@ async def _hf_image(prompt: str) -> bytes:
     raise RuntimeError(f"hf flux failed: {last}")
 
 
+async def _pexels_video(prompt: str) -> bytes:
+    import tempfile
+    from pathlib import Path as _P
+
+    from services import pexels
+    tmp = _P(tempfile.gettempdir()) / f"pxv-{abs(hash(prompt)) % 99999}.mp4"
+    ok = await pexels.fetch_video(prompt, tmp)
+    if not ok:
+        raise RuntimeError("pexels video: no match")
+    return tmp.read_bytes()
+
+
 async def _veo_video(prompt: str, duration: float) -> bytes:
     """Gemini API Veo (paid tier) — LRO submit + poll + download; falls through on quota errors."""
     import httpx
@@ -307,6 +322,18 @@ async def image(prompt: str, out_path: Path, ref_image: Path = None, session: st
                 data = await _qwen_image(prompt, ref_image)
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_bytes(data)
+                _ok(provider)
+                return {"provider": provider}
+            if provider == "stability":
+                from services.llm import _stability_image
+                if not await _stability_image(prompt, out_path):
+                    raise RuntimeError("stability: no image")
+                _ok(provider)
+                return {"provider": provider}
+            if provider == "pexels":
+                from services import pexels
+                if not await pexels.fetch_photo(prompt, out_path):
+                    raise RuntimeError("pexels: no match")
                 _ok(provider)
                 return {"provider": provider}
             if provider in ("gemini", "emergent", "openai", "procedural"):
@@ -417,6 +444,12 @@ async def video(prompt: str, ref_image: Path, out_path: Path, duration: float = 
                 return {"provider": provider}
             if provider == "replicate_wan":
                 data = await _replicate_video(prompt, duration)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_bytes(data)
+                _ok(provider)
+                return {"provider": provider}
+            if provider == "pexels_video":
+                data = await _pexels_video(prompt)
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_bytes(data)
                 _ok(provider)
