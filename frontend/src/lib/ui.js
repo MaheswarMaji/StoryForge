@@ -17,6 +17,7 @@ export const STATUS = {
   qa_failed: { label: "QA Flagged", cls: "bg-orange-950 text-orange-300 border-orange-700" },
   in_review: { label: "In Review", cls: "bg-purple-950 text-purple-300 border-purple-600" },
   approved: { label: "Approved", cls: "bg-emerald-950 text-emerald-300 border-emerald-600" },
+  published: { label: "Published", cls: "bg-teal-950 text-teal-300 border-teal-600" },
   rejected: { label: "Rejected", cls: "bg-rose-950 text-rose-300 border-rose-600" },
   edits_requested: { label: "Edits Requested", cls: "bg-yellow-950 text-yellow-300 border-yellow-700" },
   failed: { label: "Failed", cls: "bg-red-950 text-red-300 border-red-700" },
@@ -37,11 +38,11 @@ export const statusMeta = (s) => STATUS[s] || BOOK_STATUS[s] || { label: s, cls:
 export const PIPELINE_STEPS = [
   { key: "script", label: "Script" },
   { key: "voice", label: "Voices" },
-  { key: "frames", label: "Frames" },
-  { key: "clips", label: "Clips" },
-  { key: "stitch", label: "Stitch" },
+  { key: "media", label: "Media" },
+  { key: "stitch", label: "Compiled" },
   { key: "qa", label: "QA" },
   { key: "review", label: "Review" },
+  { key: "published", label: "Uploaded" },
 ];
 
 export const TTS_VOICES = [

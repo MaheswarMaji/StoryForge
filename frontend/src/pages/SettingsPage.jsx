@@ -1,19 +1,92 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle2, ExternalLink, Instagram, Loader2, Plug, RefreshCw, ShieldCheck, ShieldAlert, XCircle, Youtube } from "lucide-react";
+import { CheckCircle2, Instagram, KeyRound, Loader2, Plug, RefreshCw, ShieldCheck, ShieldAlert, XCircle, Youtube } from "lucide-react";
 import { api, usePoll } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
+const KEY_LABELS = {
+  OPENAI_API_KEY: "OpenAI (DALL·E / GPT Image 1 + LLM fallback)",
+  GEMINI_API_KEY: "Google Gemini (Veo video, TTS, image, LLM)",
+  EMERGENT_LLM_KEY: "Emergent Universal Key (LLM fallback)",
+  HF_TOKEN: "Hugging Face (free FLUX.1-schnell images)",
+  FAL_KEY: "fal.ai (FLUX / SDXL / Juggernaut images, Wan / CogVideoX clips)",
+  REPLICATE_API_TOKEN: "Replicate (FLUX images, Wan 2.1 clips)",
+  YOUTUBE_CLIENT_ID: "YouTube OAuth — Client ID",
+  YOUTUBE_CLIENT_SECRET: "YouTube OAuth — Client Secret",
+  YOUTUBE_REFRESH_TOKEN: "YouTube OAuth — Refresh Token (auto-filled after consent)",
+  INSTAGRAM_ACCESS_TOKEN: "Instagram — Long-lived Access Token",
+  INSTAGRAM_USER_ID: "Instagram — Professional User ID",
+};
+
+function ApiKeyRow({ name, info, values, setValue, clear }) {
+  return (
+    <div data-testid={`api-key-row-${name}`} className="flex flex-wrap items-center gap-2 rounded-xl bg-black/30 px-3 py-2">
+      <div className="min-w-56 flex-1">
+        <div className="flex items-center gap-2 text-xs font-semibold text-slate-200">
+          {name.replace(/_/g, " ")}
+          {info.set && <Badge className="border border-emerald-600/50 bg-emerald-950/60 text-[9px] text-emerald-300">active</Badge>}
+        </div>
+        <div className="text-[10px] text-slate-500">{KEY_LABELS[name] || name}{info.set && info.hint ? ` · ${info.hint}` : ""}</div>
+      </div>
+      <Input
+        data-testid={`api-key-${name}-input`}
+        type="password"
+        value={values[name] || ""}
+        onChange={(e) => setValue(name, e.target.value)}
+        placeholder={info.set ? "•••• (leave blank to keep)" : "paste value…"}
+        className="h-8 w-full max-w-72 border-white/10 bg-black/30 font-mono2 text-[11px] text-slate-200 sm:w-auto"
+      />
+      {info.set && (
+        <button data-testid={`clear-api-key-${name}`} onClick={() => clear(name)} title="Clear this key" className="text-slate-500 hover:text-rose-300">
+          <XCircle className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [ig, refreshIg] = usePoll("/settings/instagram", 20000);
+  const [keys, refreshKeys] = usePoll("/settings/api-keys", 30000);
   const [creds] = usePoll("/social/credentials", 30000);
   const [routerStatus] = usePoll("/router-status", 30000);
+  const [values, setValues] = useState({});
   const [token, setToken] = useState("");
   const [uid, setUid] = useState("");
   const [saving, setSaving] = useState(false);
+  const [savingKeys, setSavingKeys] = useState(false);
+
+  const saveKeys = async () => {
+    const filled = Object.fromEntries(Object.entries(values).filter(([, v]) => v && v.trim()));
+    if (!Object.keys(filled).length) {
+      toast.error("Nothing to save — paste at least one key");
+      return;
+    }
+    setSavingKeys(true);
+    try {
+      const r = await api.put("/settings/api-keys", { values: filled });
+      toast.success(`Saved: ${r.data.saved.join(", ")}`);
+      setValues({});
+      refreshKeys();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Save failed");
+    } finally {
+      setSavingKeys(false);
+    }
+  };
+
+  const clearKey = async (name) => {
+    try {
+      await api.delete(`/settings/api-keys/${name}`);
+      toast.success(`${name} cleared`);
+      refreshKeys();
+    } catch {
+      toast.error("Clear failed");
+    }
+  };
 
   const save = async () => {
     if (!token.trim() || !uid.trim()) {
@@ -45,10 +118,29 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8">
+    <div className="mx-auto max-w-5xl space-y-8 pb-16">
       <div>
-        <h1 className="font-display text-3xl font-extrabold tracking-tight text-slate-100 lg:text-4xl">Integrations</h1>
-        <p className="mt-1 text-sm text-slate-400">Connect publishing destinations and watch the model-router health. Credentials are validated before being saved.</p>
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-slate-100 lg:text-4xl">Integrations &amp; API Keys</h1>
+        <p className="mt-1 text-sm text-slate-400">Every key is configurable here — saved server-side and applied instantly. The model router picks the best provider that still has quota.</p>
+      </div>
+
+      <div data-testid="api-keys-card" className="card-glow rounded-2xl border border-amber-500/15 bg-[#12141F] p-6">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <KeyRound className="h-5 w-5 text-amber-400" />
+          <h3 className="font-display text-lg font-semibold text-amber-300">API Keys Vault</h3>
+          <Button data-testid="save-api-keys-button" size="sm" onClick={saveKeys} disabled={savingKeys} className="ml-auto bg-amber-500 font-semibold text-[#090A0F] hover:bg-amber-400">
+            {savingKeys ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />} Save Keys
+          </Button>
+        </div>
+        <div className="space-y-2">
+          {Object.entries(keys || {}).map(([name, info]) => (
+            <ApiKeyRow key={name} name={name} info={info} values={values}
+              setValue={(k, v) => setValues({ ...values, [k]: v })} clear={clearKey} />
+          ))}
+        </div>
+        <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+          Slide-mode image priority: OpenAI → Hugging Face FLUX.1-schnell → fal.ai. Clip-mode video priority: Gemini Veo → Replicate (Wan 2.1 / CogVideoX) → fal.ai. Free local TTS (Kokoro / XTTS v2 / gTTS) always runs first; procedural frames + Ken Burns motion are the never-fail fallback.
+        </p>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -80,7 +172,7 @@ export default function SettingsPage() {
           ) : (
             <div className="mt-4 space-y-3">
               <p className="text-xs leading-relaxed text-slate-400">
-                From a Meta app with <span className="text-slate-200">instagram_business_basic</span> + <span className="text-slate-200">instagram_business_content_publish</span> permissions, generate a <span className="text-slate-200">long-lived access token</span> for your Instagram Professional account and paste it here with the account ID.
+                From a Meta app with <span className="text-slate-200">instagram_business_basic</span> + <span className="text-slate-200">instagram_business_content_publish</span> permissions, generate a <span className="text-slate-200">long-lived access token</span> for your Instagram Professional account and paste it here with the account ID. (You can also use the API Keys vault above.)
               </p>
               <Input data-testid="instagram-token-input" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Long-lived access token" className="border-white/10 bg-black/30 font-mono2 text-xs text-slate-200" />
               <Input data-testid="instagram-userid-input" value={uid} onChange={(e) => setUid(e.target.value)} placeholder="Instagram Professional user ID (e.g. 1784xxxxxxxx)" className="border-white/10 bg-black/30 font-mono2 text-xs text-slate-200" />
@@ -97,15 +189,15 @@ export default function SettingsPage() {
             <Youtube className="h-5 w-5 text-red-500" />
             <h3 className="font-display text-lg font-semibold text-slate-100">YouTube Shorts</h3>
             <Badge data-testid="youtube-status-badge" className={`border text-[10px] ${creds?.youtube ? "border-emerald-600/50 bg-emerald-950/60 text-emerald-300" : "border-amber-500/40 bg-amber-950/30 text-amber-300"}`}>
-              {creds?.youtube ? "connected" : "setup on Engagement page"}
+              {creds?.youtube ? "connected" : "needs OAuth consent"}
             </Badge>
           </div>
           <p className="mt-4 text-xs leading-relaxed text-slate-400">
-            One-time OAuth: add the redirect URI in Google Cloud Console, authorize access, and the refresh token is stored automatically. Shorts upload then works from any approved story.
+            One-time OAuth (Data API v3): add the redirect URI in Google Cloud Console, authorize access, and the refresh token is stored automatically. Shorts upload then works from any approved story. Client ID/Secret can be pasted in the vault above.
           </p>
           <Link to="/social">
             <Button data-testid="youtube-manage-link" variant="outline" size="sm" className="mt-4 border-red-500/40 text-red-300 hover:bg-red-500/10">
-              <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> Manage connection
+              <ShieldCheck className="mr-1.5 h-3.5 w-3.5" /> Manage connection
             </Button>
           </Link>
         </div>
@@ -126,6 +218,7 @@ export default function SettingsPage() {
               <span className="font-mono2 text-slate-300">{name}</span>
               <span className="flex items-center gap-1.5 text-[10px] text-slate-500">
                 {p.key ? "key ✓" : "no key"}
+                {p.capable === false && <span className="text-orange-400">needs GPU/RAM</span>}
                 <span className={`h-2 w-2 rounded-full ${p.healthy ? "bg-emerald-400" : "bg-rose-500"}`} />
               </span>
             </div>

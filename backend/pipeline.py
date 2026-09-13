@@ -38,7 +38,8 @@ async def produce_video(story_id: str, setp):
     chunks = (story.get("script") or {}).get("chunks") or []
     if not chunks:
         raise RuntimeError("story has no script — generate the script first")
-    chunks = chunks[:8]
+    chunks = chunks[:24]
+    mode = story.get("mode") or (channel.get("mode") or "slide")
     aid = story_id
 
     async def set_story(**kw):
@@ -151,10 +152,12 @@ async def produce_video(story_id: str, setp):
             if editor.get("silence_before_index") == i:
                 silence_pad = 0.6
             rate_mult = {"climax": 1.7, "action": 1.4, "twist": 1.2, "hook": 1.15}.get(chunk.get("beat"), 1.0)
-            vid_res = await router.video(
-                f"{style}. {chunk.get('video_prompt', chunk.get('visual', ''))} "
-                f"Characters must match: {anchor[:400]}",
-                char_path, MEDIA_ROOT / "tmp" / f"{aid}-raw-{i:02d}.mp4", dur + silence_pad)
+            vid_res = {"provider": "kenburns"}
+            if mode == "clip":
+                vid_res = await router.video(
+                    f"{style}. {chunk.get('video_prompt', chunk.get('visual', ''))} "
+                    f"Characters must match: {anchor[:400]}",
+                    char_path, MEDIA_ROOT / "tmp" / f"{aid}-raw-{i:02d}.mp4", dur + silence_pad)
             hook_card = None
             if i == 0:
                 hook_card = await asyncio.to_thread(

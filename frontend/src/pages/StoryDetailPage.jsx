@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { Play, RefreshCw, Download, CheckCircle2, XCircle, AlertTriangle, Loader2, Wand2, Sparkles, TrendingUp } from "lucide-react";
+import { Play, RefreshCw, Download, CheckCircle2, XCircle, AlertTriangle, Loader2, Wand2, Sparkles, TrendingUp, Clapperboard } from "lucide-react";
 import { api, usePoll, useChannels, MEDIA } from "@/lib/api";
 import { BEATS, beatMeta, PIPELINE_STEPS, statusMeta } from "@/lib/ui";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,8 @@ export default function StoryDetailPage() {
   const { channels } = useChannels();
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [drafts, setDrafts] = useState({});
 
   if (err) return <div className="p-10 text-red-400">Story not found</div>;
   if (!story) return <div className="p-10 text-slate-500">Opening studio…</div>;
@@ -33,8 +35,25 @@ export default function StoryDetailPage() {
   const regen = (i) => act(() => api.post(`/stories/${id}/segments/${i}/regenerate`).then(() => toast.success(`Regenerating segment ${i + 1}`)));
   const review = (action, note = "") => act(() => api.post(`/stories/${id}/review`, { action, notes: note }).then(() => toast.success(`Review recorded: ${action.replace("_", " ")}`)));
   const improve = () => act(() => api.post(`/stories/${id}/improve`).then(() => toast.success("Improvement Coach queued — targeted edits, kept only if the score improves")));
+  const saveScript = () => act(async () => {
+    const chunkEdits = Object.entries(drafts).map(([i, d]) => ({ index: Number(i), ...d }));
+    await api.patch(`/stories/${id}/script`, { chunks: chunkEdits });
+    setEditing(false);
+    setDrafts({});
+    toast.success("Script updated — edited segments will re-render on next produce");
+  });
+  const saveConfig = (patch) => act(async () => {
+    await api.put(`/stories/${id}/config`, patch);
+    if (patch.target_seconds != null) {
+      await api.post(`/stories/${id}/script`);
+      toast.success("Length updated — the script is being rewritten; review it before producing");
+    } else {
+      toast.success("Video style updated");
+    }
+  });
 
   const stageIdx = (() => {
+    if (story.status === "published") return PIPELINE_STEPS.length;
     if (["approved", "edits_requested", "rejected"].includes(story.status)) return PIPELINE_STEPS.length - 1;
     const m = { "": 0, Scripting: 0, "Script ready": 0, "Character sheet": 1, "Queued": 1 };
     const s = story.stage || "";
@@ -59,6 +78,10 @@ export default function StoryDetailPage() {
                 Viral {story.script.viral_score.total}/100
               </Badge>
             )}
+            {story.mode && (
+              <Badge variant="outline" className="border-cyan-500/40 text-[11px] text-cyan-300">{story.mode === "clip" ? "AI video clips" : "Slide-based"}</Badge>
+            )}
+            {!!story.target_seconds && <Badge variant="outline" className="border-white/15 font-mono2 text-slate-400">~{story.target_seconds}s</Badge>}
             {story.script?.editor?.factual_ok === false && (
               <Badge className="border border-orange-500/50 bg-orange-950/40 text-[11px] text-orange-300">Fact-check: corrections applied</Badge>
             )}
@@ -134,6 +157,27 @@ export default function StoryDetailPage() {
         </div>
       )}
 
+      {chunks.length > 0 && !hasVideo && story.status !== "rendering" && (
+        <div data-testid="render-config-card" className="card-glow flex flex-wrap items-center gap-x-8 gap-y-4 rounded-2xl border border-cyan-500/20 bg-cyan-950/10 p-5">
+          <div className="flex items-center gap-2 text-xs text-slate-300">
+            <Clapperboard className="h-4 w-4 text-cyan-300" /> Video style
+            <select data-testid="mode-select" value={story.mode || "slide"} onChange={(e) => saveConfig({ mode: e.target.value })}
+              className="rounded-lg border border-white/15 bg-black/40 px-2 py-1.5 text-xs text-slate-200">
+              <option value="slide">Slide-based — image slides + infographics</option>
+              <option value="clip">AI video clips per scene</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-slate-300">
+            Length
+            <select data-testid="length-select" value={story.target_seconds || 90} onChange={(e) => saveConfig({ target_seconds: Number(e.target.value) })}
+              className="rounded-lg border border-white/15 bg-black/40 px-2 py-1.5 text-xs text-slate-200">
+              {[30, 45, 60, 90, 120, 150, 180, 240].map((s) => <option key={s} value={s}>{s} seconds</option>)}
+            </select>
+          </div>
+          <span className="text-[11px] text-slate-500">Changing the length rewrites the script — review it again before producing.</span>
+        </div>
+      )}
+
       {chunks.length > 0 && (
         <div data-testid="improvement-coach-card" className="card-glow rounded-2xl border border-emerald-500/20 bg-emerald-950/10 p-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -186,7 +230,26 @@ export default function StoryDetailPage() {
           </div>
 
           <div className="space-y-4">
-            <h3 className="font-display text-xl font-semibold text-amber-300">Script Segments</h3>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="font-display text-xl font-semibold text-amber-300">Script Segments</h3>
+              {chunks.length > 0 && story.status !== "rendering" && story.status !== "published" && (
+                editing ? (
+                  <div className="flex gap-2">
+                    <Button data-testid="save-script-edits-button" size="sm" disabled={busy} className="bg-emerald-500 font-semibold text-[#090A0F] hover:bg-emerald-400" onClick={saveScript}>
+                      <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Save Changes
+                    </Button>
+                    <Button data-testid="cancel-script-edits-button" size="sm" variant="outline" className="border-white/20 text-slate-300" onClick={() => { setEditing(false); setDrafts({}); }}>
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <Button data-testid="edit-script-button" size="sm" variant="outline" className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
+                    onClick={() => setDrafts(Object.fromEntries(chunks.map((c, i) => [i, { voiceover: c.voiceover, visual: c.visual, video_prompt: c.video_prompt }]))) || setEditing(true)}>
+                    <Wand2 className="mr-1.5 h-3.5 w-3.5" /> Review &amp; Edit Script
+                  </Button>
+                )
+              )}
+            </div>
             {chunks.map((c, i) => {
               const bm = beatMeta(c.beat);
               return (
@@ -201,8 +264,28 @@ export default function StoryDetailPage() {
                   </div>
                   <div className="grid gap-5 lg:grid-cols-5">
                     <div className="lg:col-span-3">
-                      <p data-testid="segment-voiceover" className="font-deva text-lg font-medium leading-relaxed text-slate-100">“{c.voiceover}”</p>
-                      <p className="mt-3 font-mono2 text-[11px] leading-relaxed text-slate-400">VISUAL: {c.video_prompt || c.visual}</p>
+                      {editing ? (
+                        <Textarea data-testid={`voiceover-edit-${i}`} rows={2}
+                          value={(drafts[i] || {}).voiceover ?? c.voiceover}
+                          onChange={(e) => setDrafts({ ...drafts, [i]: { ...(drafts[i] || {}), voiceover: e.target.value } })}
+                          className="font-deva border-white/15 bg-black/40 text-base text-slate-100" />
+                      ) : (
+                        <p data-testid="segment-voiceover" className="font-deva text-lg font-medium leading-relaxed text-slate-100">“{c.voiceover}”</p>
+                      )}
+                      {editing ? (
+                        <div className="mt-3 space-y-2">
+                          <Textarea data-testid={`visual-edit-${i}`} rows={2} placeholder="visual summary"
+                            value={(drafts[i] || {}).visual ?? c.visual}
+                            onChange={(e) => setDrafts({ ...drafts, [i]: { ...(drafts[i] || {}), visual: e.target.value } })}
+                            className="border-white/15 bg-black/40 font-mono2 text-[11px] text-slate-300" />
+                          <Textarea data-testid={`video-prompt-edit-${i}`} rows={3} placeholder="AI image/video prompt"
+                            value={(drafts[i] || {}).video_prompt ?? c.video_prompt}
+                            onChange={(e) => setDrafts({ ...drafts, [i]: { ...(drafts[i] || {}), video_prompt: e.target.value } })}
+                            className="border-white/15 bg-black/40 font-mono2 text-[11px] text-slate-400" />
+                        </div>
+                      ) : (
+                        <p className="mt-3 font-mono2 text-[11px] leading-relaxed text-slate-400">VISUAL: {c.video_prompt || c.visual}</p>
+                      )}
                       <div className="mt-4 flex items-center gap-3">
                         {media.audio?.[i] && (
                           <div className="flex items-center gap-2 rounded-full bg-black/40 px-3 py-1.5">

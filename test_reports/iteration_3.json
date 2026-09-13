@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 3 covers the new UNLOCKED create-flow, script/config editors, API-keys vault, mode-routing and 8 video-type registry. Backend: 21/21 pytest cases pass in 4.04s across TestVideoTypes (8-registry integrity + required fields), TestCreateStory (tech+clip+45s→vt-tech channel+job enqueued, 400 empty, 400 unknown type, 9999→clamp 240), TestPatchScript (chunk0 edit persists + audio cache /app/backend/media/audio/{id}/00.mp3 unlinked, 404 unknown story), TestStoryConfig (mode slide↔clip wipes clips dir, target 9999→240 & 5→30 clamp), TestApiKeysVault (11 keys with set/hint only + no raw leak, HF_TOKEN PUT saved & masked & DELETE clears, unknown key rejected quietly on PUT & 400 on DELETE), TestRouterStatus (gemini_veo/hf_flux/kokoro/kenburns present), TestAdminGating (401 anon / 403 non-admin / 200 admin), TestOpenEndpoints (stories/dashboard/channels(≥8)/media-health all 200 no auth). Direct python services.router.tts('नमस्ते…','kokoro:hm_omega','hi',Path) → provider='kokoro' dur=2.83s (voice-spec parser works). Frontend: / opens dashboard WITHOUT login wall; signin-chip visible in header. /create shows all 8 video-type cards (video-type-{key}), mode-slide-radio, mode-clip-radio, length-slider, create-video-button, and click selection works (farming card + clip + 60s). /settings renders api-keys-card with exactly 11 api-key rows + save-api-keys-button. /stories/6aa57c1eaad23f394fffaa41 renders pipeline-tracker with 7 steps ending 'Uploaded' (Script→Voices→Media→Compiled→QA→Review→Uploaded), improvement-coach-card present, edit-script-button toggles inline editor exposing voiceover-edit-0/visual-edit-0/video-prompt-edit-0 textareas + save-script-edits-button + cancel-script-edits-button; render-config-card correctly ABSENT (hasVideo=true).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "DashboardPage", "issue": "React console warning still present: 'Each child in a list should have a unique key prop. Check the render method of DashboardPage.' Carry-over from iter_1/iter_2 — non-blocking.", "selector": "DashboardPage list render", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix leftover DashboardPage missing key prop warning (unchanged since iter_1).",
+    "Chunk 0 of story 6aa57c1eaad23f394fffaa41 has stale voiceover 'EDITED HOOK LINE for verification' (from an earlier manual/test edit before this iteration started — not caused by iter_3 tests, but leaves demo Hindi hook broken). Main agent may want to restore original hook line in Mongo: db.stories.updateOne({_id:'6aa57c1eaad23f394fffaa41'},{$set:{'script.chunks.0.voiceover':'<original hindi hook>'}})."
+  ],
+  "critical_code_review_comments": [
+    "Vault GET response never leaks raw values — verified fake HF_TOKEN 'hf_fake_TESTABCDEF123456' does NOT appear in GET body (only 6-char hint + '…'). Good masking discipline.",
+    "PATCH /stories/{id}/script correctly invalidates audio+frame+clip caches for edited indexes (confirmed 00.mp3 absent after edit).",
+    "PUT /stories/{id}/config wipes clips dir on mode switch and clamps target_seconds to [30,240] as spec'd.",
+    "Auth is now truly optional on /api/stories, /api/dashboard, /api/channels, /api/settings/api-keys, /api/video-types, /api/router-status while /api/admin/* still returns 401 anon and 403 non-admin — segregation is clean.",
+    "TestPatchScript fixture snapshotted chunk 0 BEFORE tests to enable restore, but the snapshot itself already contained a stale value from a prior session — main agent should baseline the demo story."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (21/21)", "frontend": "100% (all critical testids resolve; 1 pre-existing key-prop console warning)"},
+  "test_credentials": "Admin bearer minted for user_fba19a29ab52 (nyai.deepak@gmail.com) per /app/auth_testing.md. Non-admin QA user minted in same test module. All sessions/users cleaned up post-run.",
+  "seed_data_creation": "None persisted. Ephemeral TEST_* stories/jobs created in TestCreateStory are deleted immediately after each test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py fully rewritten (21 pytest cases) for the UNLOCKED app. Auth is optional on nearly everything; only /api/admin/* is gated. TestApiKeysVault uses HF_TOKEN (fake value 'hf_fake_TESTABCDEF123456') and cleans up. TestCreateStory creates TEST_ stories with video_type=tech/educational and deletes them. TestPatchScript modifies chunk 0 of 6aa57c1eaad23f394fffaa41 and restores via module-scope fixture. Story 6aa57c1eaad23f394fffaa41 mode was reset to 'slide' at end of run. Kokoro voice-spec 'kokoro:hm_omega' verified working (2.83s dur). Frontend testids to use: video-type-{key}, mode-slide-radio, mode-clip-radio, length-slider, create-video-button, api-keys-card, api-key-row-{name}, save-api-keys-button, pipeline-tracker (single container), edit-script-button, voiceover-edit-{i}, visual-edit-{i}, video-prompt-edit-{i}, save-script-edits-button, cancel-script-edits-button, render-config-card, mode-select, length-select, improvement-coach-card, signin-chip.",
+  "rca_of_the_issue": "N/A — no critical bugs. Only carry-over DashboardPage key-prop warning and stale voiceover on demo story chunk 0 (pre-existing before iter_3)."
+}

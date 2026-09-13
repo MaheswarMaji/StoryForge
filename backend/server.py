@@ -89,8 +89,38 @@ async def seed_channels():
 async def startup():
     await seed_channels()
     await _load_social_settings()
+    await _load_key_vault()
+    await _seed_video_type_channels()
     tasks_mod.register_all()
     asyncio.create_task(_delayed_workers())
+
+
+async def _load_key_vault():
+    doc = await db.settings.find_one({"key": "api_keys"})
+    n = 0
+    for k, v in (doc or {}).get("values", {}).items():
+        if not (os.environ.get(k) or "").strip() and str(v).strip():
+            os.environ[k] = str(v).strip()
+            n += 1
+    if n:
+        print(f"[startup] loaded {n} API keys from settings vault", flush=True)
+
+
+async def _seed_video_type_channels():
+    from services.video_types import VIDEO_TYPES
+    for vtype, cfg in VIDEO_TYPES.items():
+        key = f"vt-{vtype}"
+        if not await db.channels.find_one({"key": key}):
+            from models import Channel
+            doc = Channel(key=key, name=cfg["name"],
+                          description=f"{cfg['name']} ({cfg['audience']}) — voice & music auto-selected",
+                          language=cfg["language"], tone=cfg["tone"], voice=cfg["voice"],
+                          music_mood=cfg["music_mood"], music_volume=cfg["music_volume"],
+                          safety_level=cfg["safety_level"], is_kids=cfg["is_kids"],
+                          style_prefix=cfg["style_prefix"], cta_text=cfg["cta_text"],
+                          mode="slide", video_type=vtype)
+            await db.channels.insert_one(doc.to_mongo())
+            print(f"[startup] seeded channel {key}", flush=True)
 
 
 async def _load_social_settings():

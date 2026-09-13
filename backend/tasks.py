@@ -72,7 +72,8 @@ async def run_script_job(job, setp):
     await db.stories.update_one({"_id": story_id},
                                 {"$set": {"status": "scripting", "stage": "Writing script", "error": ""}})
     await setp(20, "Writing retention script")
-    script, cost = await agents.write_script(story, channel or {})
+    script, cost = await agents.write_script(story, channel or {},
+                                             int(story.get("target_seconds") or 90))
     cs = script.get("character_sheet") or {}
     update = {
         "script": script, "status": "script_ready", "stage": "Script ready",

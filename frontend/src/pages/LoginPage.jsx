@@ -37,7 +37,7 @@ export default function LoginPage() {
           {going ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon />} Sign in with Google
         </button>
         <p className="mt-6 text-[11px] leading-relaxed text-slate-600">
-          Google sign-in is the only way into the studio. Your session stays valid for 7 days.
+          Optional — the studio works without signing in. Sign in with Google to unlock the Admin Console; your session stays valid for 7 days.
         </p>
       </div>
     </div>

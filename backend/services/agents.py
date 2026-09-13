@@ -62,9 +62,14 @@ OCR TEXT:
     return stories, cost
 
 
-async def write_script(story: dict, channel: dict):
+async def write_script(story: dict, channel: dict, target_seconds: int = 90):
+    target_seconds = max(30, min(240, int(target_seconds or 90)))
+    n_chunks = max(3, round(target_seconds / 10))
     kids = channel.get("is_kids")
-    prompt = f"""Create a 60-120 second vertical video script for this story, for the channel "{channel.get('name')}".
+    story_view = {k: v for k, v in story.items() if k not in ("source_text", "script", "media")}
+    source = (story.get("source_text") or "").strip()
+    source_block = f"\n\nSOURCE SCRIPT/PROMPT (user-provided — follow this content faithfully):\n{source[:12000]}" if source else ""
+    prompt = f"""Create a ~{target_seconds} second vertical video script for this story, for the channel "{channel.get('name')}".
 
 CHANNEL DIRECTION:
 - Narration language: {channel.get('language', 'hi')} (write voiceover text in this language & script)
@@ -72,12 +77,12 @@ CHANNEL DIRECTION:
 - Safety: {"STRICT for kids (7+): no gore, no terrifying imagery, ghosts must be playful/gentle, moral must be kind" if kids else "General audience 13+: tension and mild darkness allowed, no explicit content"}
 - Visual style: {channel.get('style_prefix')}
 - CTA: {channel.get('cta_text')}
-
+{source_block}
 STORY JSON:
-{json.dumps(story, ensure_ascii=False, default=str)}
+{json.dumps(story_view, ensure_ascii=False, default=str)}
 
 REQUIREMENTS:
-- 6-8 chunks of ~10 seconds each (total 60-95s).
+- EXACTLY {n_chunks} chunks of ~10 seconds each (total ≈ {target_seconds}s; may run ±15%).
 - Across the chunks, cover ALL SIX beats in order: hook (first chunk), story, twist, climax, action, lesson. Multiple chunks may share a beat (e.g. two 'story' chunks), but hook is only chunk 1 and lesson is the last chunk which must end with the CTA woven naturally.
 - Each chunk: "beat" (hook|story|twist|climax|action|lesson), "voiceover" (max 28 words, spoken word for word; chunk 1 must be an irresistible question or shocking line), "visual" (one-line scene summary), "video_prompt" (DETAILED English prompt for AI image generation: style, subject, action, setting, lighting, mood; 9:16 vertical; visuals must REVEAL information the narration does not state verbatim), "camera" (zoom_in|zoom_out|pan_left|pan_right|static), "emotion", "music_mood" (devotional|suspense|horror|moral|action|sad|happy).
 - "character_sheet": {{"anchor": a single dense paragraph describing EVERY recurring character's exact appearance (age, face, hair, clothing colors, build, accessories) plus the global art style and color palette — this anchor will be reused verbatim for every generated image to keep characters identical across segments.}}

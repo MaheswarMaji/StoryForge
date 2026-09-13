@@ -6,20 +6,6 @@ export const MEDIA = `${process.env.REACT_APP_BACKEND_URL}`;
 
 export const api = axios.create({ baseURL: API, withCredentials: true });
 
-// Any 401 outside the auth endpoints bounces the browser back to the login screen
-// (skipped when already on /login, otherwise the channel fetch would reload-loop the login page)
-api.interceptors.response.use(
-  (r) => r,
-  (error) => {
-    const url = String(error?.config?.url || "");
-    const onLogin = window.location.pathname === "/login";
-    if (error?.response?.status === 401 && !url.includes("/auth/") && !onLogin) {
-      window.location.href = "/login";
-    }
-    return Promise.reject(error);
-  },
-);
-
 export function usePoll(url, ms = 4000) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);

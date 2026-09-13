@@ -8,13 +8,13 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from auth import verify_auth
+from auth import optional_user_id
 from db import db
 from job_queue import HEARTBEAT, enqueue
 from models import Book, Story, Channel, utcnow
 from services.ocr import MEDIA_ROOT
 
-router = APIRouter(prefix="/api", dependencies=[Depends(verify_auth)])
+router = APIRouter(prefix="/api")
 
 
 def fix(doc):
@@ -59,7 +59,7 @@ async def upload_book(request: Request, file: UploadFile = File(...), channel_id
     if len(data) > 120 * 1024 * 1024:
         raise HTTPException(400, "PDF too large (max 120MB)")
     book = Book(filename=file.filename, channel_id=channel_id, size_bytes=len(data),
-                owner_id=getattr(request.state, "user_id", ""))
+                owner_id=await optional_user_id(request))
     from services import storage
     result = storage.put_object(
         f"{storage.APP_NAME}/uploads/{book.id}/{file.filename}",
@@ -180,6 +180,120 @@ async def improve_story(story_id: str):
     job_id = await enqueue("improve", story_id,
                            f"Improve: {s.get('title_english') or s.get('title_hindi', story_id)[:40]}")
     return {"job_id": job_id}
+
+
+# ---------- prompt / script based creation ----------
+class CreateBody(BaseModel):
+    title: str = ""
+    source_text: str
+    video_type: str = "mythology_moral"
+    length_seconds: int = 90
+    mode: str = "slide"  # slide | clip
+
+
+@router.post("/stories/create")
+async def create_story(body: CreateBody):
+    from services.video_types import VIDEO_TYPES
+    cfg = VIDEO_TYPES.get(body.video_type)
+    if not cfg:
+        raise HTTPException(400, "unknown video_type")
+    if not body.source_text.strip():
+        raise HTTPException(400, "paste a script or prompt first")
+    target = max(30, min(240, int(body.length_seconds or 90)))
+    mode = body.mode if body.mode in ("slide", "clip") else "slide"
+    key = f"vt-{body.video_type}"
+    ch = await db.channels.find_one({"key": key})
+    if not ch:
+        ch_doc = Channel(key=key, name=cfg["name"],
+                         description=f"{cfg['name']} ({cfg['audience']}) — voice & music auto-selected",
+                         language=cfg["language"], tone=cfg["tone"], voice=cfg["voice"],
+                         music_mood=cfg["music_mood"], music_volume=cfg["music_volume"],
+                         safety_level=cfg["safety_level"], is_kids=cfg["is_kids"],
+                         style_prefix=cfg["style_prefix"], cta_text=cfg["cta_text"],
+                         mode=mode, video_type=body.video_type)
+        await db.channels.insert_one(ch_doc.to_mongo())
+        ch = await db.channels.find_one({"key": key})
+    story = Story(book_id=f"prompt-{utcnow().strftime('%Y%m%d-%H%M%S')}", channel_id=ch["_id"],
+                  title_hindi=body.title.strip(), title_english=body.title.strip()[:100],
+                  source="Pasted script / prompt", category=cfg["name"],
+                  target_seconds=target, mode=mode,
+                  source_text=body.source_text.strip()[:20000],
+                  emotional_tone=cfg["tone"][:60], target_audience=cfg["audience"],
+                  visual_style=cfg["style_prefix"][:120], estimated_length=f"{target}s",
+                  status="draft")
+    await db.stories.insert_one(story.to_mongo())
+    job_id = await enqueue("script", story.id, f"Script: {body.title[:40] or story.id}")
+    return {"story_id": story.id, "job_id": job_id}
+
+
+@router.get("/video-types")
+async def video_types():
+    from services.video_types import VIDEO_TYPES
+    return [{"key": k, **v} for k, v in VIDEO_TYPES.items()]
+
+
+class ScriptPatchBody(BaseModel):
+    chunks: List[dict]
+
+
+@router.patch("/stories/{story_id}/script")
+async def patch_script(story_id: str, body: ScriptPatchBody):
+    s = await db.stories.find_one({"_id": story_id})
+    if not s:
+        raise HTTPException(404, "story not found")
+    if s["status"] == "rendering":
+        raise HTTPException(409, "pipeline busy — wait for the render to finish")
+    chunks = (s.get("script") or {}).get("chunks") or []
+    changed = set()
+    for edit in body.chunks:
+        if not isinstance(edit, dict):
+            continue
+        try:
+            idx = int(edit.get("index", -1))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < len(chunks):
+            for k in ("voiceover", "visual", "video_prompt", "camera", "emotion"):
+                if edit.get(k) is not None:
+                    chunks[idx][k] = str(edit[k])[:2000]
+                    changed.add(idx)
+    for i in changed:  # invalidate caches so re-render picks up edits
+        for sub, ext in (("audio", "mp3"), ("frames", "png")):
+            (MEDIA_ROOT / sub / story_id / f"{i:02d}.{ext}").unlink(missing_ok=True)
+        (MEDIA_ROOT / "clips" / story_id / f"{i:02d}.mp4").unlink(missing_ok=True)
+    s["script"]["chunks"] = chunks
+    await db.stories.update_one({"_id": story_id}, {"$set": {
+        "script": s["script"], "stage": "Script edited", "updated_at": utcnow()}})
+    return {"ok": True, "edited": sorted(changed)}
+
+
+class ConfigBody(BaseModel):
+    mode: Optional[str] = None
+    target_seconds: Optional[int] = None
+
+
+@router.put("/stories/{story_id}/config")
+async def story_config(story_id: str, body: ConfigBody):
+    import shutil
+
+    s = await db.stories.find_one({"_id": story_id})
+    if not s:
+        raise HTTPException(404, "story not found")
+    if s["status"] == "rendering":
+        raise HTTPException(409, "pipeline busy")
+    patch = {}
+    if body.mode in ("slide", "clip") and body.mode != s.get("mode"):
+        # mode switch invalidates AI clips (slide mode ignores them, clip mode needs fresh ones)
+        clips_dir = MEDIA_ROOT / "clips" / story_id
+        if clips_dir.exists():
+            shutil.rmtree(clips_dir, ignore_errors=True)
+        patch["mode"] = body.mode
+    if body.target_seconds is not None:
+        patch["target_seconds"] = max(30, min(240, int(body.target_seconds)))
+    if patch:
+        patch["updated_at"] = utcnow()
+        await db.stories.update_one({"_id": story_id}, {"$set": patch})
+    return {"ok": True, **patch}
 
 
 class ReviewBody(BaseModel):
@@ -373,6 +487,57 @@ async def engagement_sync():
 
 
 # ---------- integration settings ----------
+ALLOWED_VAULT_KEYS = {"OPENAI_API_KEY", "GEMINI_API_KEY", "EMERGENT_LLM_KEY", "FAL_KEY", "HF_TOKEN",
+                      "REPLICATE_API_TOKEN", "YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET",
+                      "YOUTUBE_REFRESH_TOKEN", "INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_USER_ID"}
+
+
+@router.get("/settings/api-keys")
+async def get_api_keys():
+    return {k: {"set": bool((os.environ.get(k) or "").strip()),
+                "hint": (os.environ.get(k, "")[:6] + "…") if (os.environ.get(k, "") or "").strip() else ""}
+            for k in sorted(ALLOWED_VAULT_KEYS)}
+
+
+class KeysBody(BaseModel):
+    values: dict
+
+
+@router.put("/settings/api-keys")
+async def save_api_keys(body: KeysBody):
+    from services import social
+    saved = []
+    for k, v in (body.values or {}).items():
+        if k not in ALLOWED_VAULT_KEYS or not str(v).strip():
+            continue
+        os.environ[k] = str(v).strip()
+        saved.append(k)
+    if saved:
+        doc = await db.settings.find_one({"key": "api_keys"}) or {"key": "api_keys", "values": {}}
+        vals = doc.get("values", {})
+        for k in saved:
+            vals[k] = os.environ[k]
+        await db.settings.update_one({"key": "api_keys"},
+                                     {"$set": {"values": vals, "updated_at": utcnow()}}, upsert=True)
+        if "INSTAGRAM_ACCESS_TOKEN" in saved or "INSTAGRAM_USER_ID" in saved:
+            social.set_ig_creds(os.environ.get("INSTAGRAM_ACCESS_TOKEN", ""),
+                                os.environ.get("INSTAGRAM_USER_ID", ""), "vault")
+    return {"saved": saved}
+
+
+@router.delete("/settings/api-keys/{name}")
+async def delete_api_key(name: str):
+    from services import social
+    if name not in ALLOWED_VAULT_KEYS:
+        raise HTTPException(400, "unknown key")
+    os.environ[name] = ""
+    await db.settings.update_one({"key": "api_keys"}, {"$unset": {f"values.{name}": ""}})
+    if name in ("INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_USER_ID"):
+        social.set_ig_creds(os.environ.get("INSTAGRAM_ACCESS_TOKEN", ""),
+                            os.environ.get("INSTAGRAM_USER_ID", ""), "vault")
+    return {"cleared": name}
+
+
 @router.get("/settings/instagram")
 async def get_ig_settings():
     from services import social

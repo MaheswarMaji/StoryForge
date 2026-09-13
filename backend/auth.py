@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 import os
 
 import httpx
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
@@ -86,6 +88,18 @@ async def create_session(body: SessionBody, response: Response):
     response.set_cookie(SESSION_COOKIE, data["session_token"], max_age=SESSION_DAYS * 86400,
                         path="/", secure=True, samesite="none", httponly=True)
     return {"user": {k: user[k] for k in ("user_id", "email", "name", "picture")}}
+
+
+async def optional_user_id(request: "Request") -> str:
+    """Best-effort user attribution when a session cookie/bearer is present; never raises."""
+    try:
+        token = _token_from(request)
+        if not token:
+            return ""
+        sess = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+        return (sess or {}).get("user_id", "")
+    except Exception:
+        return ""
 
 
 @auth_router.get("/me")

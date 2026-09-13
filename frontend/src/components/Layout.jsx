@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { LayoutDashboard, UploadCloud, BookOpen, Video, Sliders, Flame, Activity, DollarSign, Newspaper, Radio, Plug, LogOut, Users } from "lucide-react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { LayoutDashboard, UploadCloud, BookOpen, Video, Sliders, Flame, Activity, DollarSign, Newspaper, Radio, Plug, LogOut, Users, Clapperboard } from "lucide-react";
+import { NavLink, Outlet, useNavigate, Link } from "react-router-dom";
 import { api, useChannels, usePoll } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const NAV = [
   { to: "/dashboard", label: "Production Dashboard", icon: LayoutDashboard, id: "nav-dashboard-link" },
   { to: "/upload", label: "PDF Upload & OCR", icon: UploadCloud, id: "nav-upload-link" },
+  { to: "/create", label: "Create from Script", icon: Clapperboard, id: "nav-create-link" },
   { to: "/stories", label: "Books & Story Library", icon: BookOpen, id: "nav-stories-link" },
   { to: "/news", label: "News Desk", icon: Newspaper, id: "nav-news-link" },
   { to: "/social", label: "Engagement Agent", icon: Radio, id: "nav-social-link" },
@@ -109,11 +110,19 @@ export default function Layout() {  const { channels, selected, setSelected } = 
               <span className="font-mono2">{(dash?.cost?.total || 0).toFixed(2)}</span>
               <span className="hidden text-amber-500/70 sm:inline">API spend</span>
             </div>
-            {user && (
+            {user ? (
               <div data-testid="user-chip" className="hidden items-center gap-2 rounded-full border border-white/10 bg-[#12141F] py-1 pl-1 pr-3 md:flex">
                 {user.picture && <img src={user.picture} alt="" className="h-6 w-6 rounded-full" referrerPolicy="no-referrer" />}
                 <span className="max-w-28 truncate text-xs text-slate-300">{user.name || user.email}</span>
               </div>
+            ) : (
+              <Link
+                data-testid="signin-chip"
+                to="/login"
+                className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-[#12141F] px-4 py-1.5 text-xs font-semibold text-slate-200 transition-colors hover:border-amber-500/40 hover:text-amber-300"
+              >
+                Sign in
+              </Link>
             )}
             <button
               data-testid="logout-button"

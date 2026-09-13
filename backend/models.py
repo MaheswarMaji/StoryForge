@@ -44,6 +44,8 @@ class Channel(BaseDocument):
     style_prefix: str = ""
     cta_text: str = ""
     is_kids: bool = False
+    mode: str = "slide"
+    video_type: str = ""
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -87,6 +89,9 @@ class Story(BaseDocument):
     estimated_length: str = "90s"
     status: str = "draft"
     stage: str = ""
+    mode: str = "slide"
+    target_seconds: int = 90
+    source_text: str = ""
     script: Dict[str, Any] = {}
     character_sheet: Dict[str, Any] = {}
     qa: Dict[str, Any] = {}

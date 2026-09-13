@@ -27,17 +27,16 @@ Later additions: bulk story extraction with curation; direct YouTube/Instagram p
 
 ## Implemented
 - 2026-09-11/12 (session 1): full pipeline end-to-end, 3 channels, editor+fact-check agent, viral scorer, news desk, YouTube OAuth, engagement, 977-page Bhagwat ingest, 11/11 tests
-- 2026-09-12 (session 2, this fork):
-  - Google-only login (Emergent Auth) gating all API routes; login page (STABLE — fixed the reload-loop flicker: axios 401 interceptor + login-page guard); user chip + logout in header; ProtectedRoute/AuthCallback race-safe flow
-  - Admin Console: /api/admin/overview + /admin UI (accounts/roles, channels, video performance w/ live YT stats, subscribers, est. revenue, API spend); first Google user auto-admin (nyai.deepak@gmail.com is admin); 403 for others
-  - Instagram: Integrations page with live Graph-API validation on save (fake tokens 400), disconnect, status badges; publish flow uses db-backed creds + PUBLIC_BASE_URL video URL
-  - Engagement agent now DRAFT-ONLY: drafts stored unposted; "Approve & Post" + edit in dashboard
-  - Improvement Coach: POST /stories/{id}/improve (max 2 rounds, 409 when exhausted); agent pinpoints weakest scope, applies ≤3 chunk edits + optional hook, re-renders (cache-aware), re-assesses, auto-reverts script if score doesn't improve; history UI with before→after badges
-  - TTS chain: XTTS v2 added (coqui-tts, verified live: 8.5s Hindi WAV on CPU; model cached at /var/cache/tts-data via symlink, transformers pinned <5, torchaudio+torchcodec CPU)
-  - Image chain: qwen_local provider added (capability-gated: needs CUDA or 40GB+ RAM — reports capable=false here, falls through instantly); fal video chain extended with CogVideoX-5b
-  - Disk hardening: found /app+/root share ONE 9.8G volume; cleaned 600MB stale OCR page renders + pip cache; disk_guard() sweeps tmp/page-PNGs and fails loudly under 600MB; XTTS model relocated off the small volume
-  - Testing: 30/30 backend pytest cases (iteration_2.json) incl. auth gating, admin 200/403, IG validation, draft-only engagement, improve guards; frontend screens verified via Playwright screenshots (desktop)
-- Provider billing states (not code bugs): fal.ai account LOCKED (exhausted balance — needs top-up at fal.ai/dashboard/billing), Emergent universal key budget exceeded (Profile → Manage plan → Universal Key → Add Balance), OpenAI key unfunded, Gemini key cyclically rate-limited. Until topped up, images render as procedural mandala art + Ken Burns motion; when any provider recovers the router picks it up automatically.
+- 2026-09-12 (session 3, current): 
+  - **App unlocked** — mandatory sign-in wall removed (user was locked out); Google sign-in is now OPTIONAL (Sign in chip → /login); only /api/admin/* still requires an admin session (401/403 enforced)
+  - **Two production modes** (per-story): slide-based (image slides + infographics + narration) and AI-clip mode; image chain priority OpenAI → HF FLUX.1-schnell → fal.ai; video chain priority Gemini Veo (LRO REST) → Replicate (Wan 2.1) → fal.ai (Wan/CogVideoX); Ken Burns + procedural frames remain the never-fail local fallback; FREE TTS first (kokoro → xtts → gtts, per-type voice specs like kokoro:hm_omega)
+  - **Create from Script/Prompt** (/create): paste script or idea → 8 video-type registry (mythology_moral, folk_horror, motivational, kids_fables, educational, business, farming, tech) auto-selects voice/music/tone/style via auto-seeded channels (vt-*); flexible length 30–240s (chunks cap raised to 24)
+  - **Script review & edit before media generation**: PATCH /stories/{id}/script with inline editor UI (voiceover/visual/video_prompt), cache-aware (edited segments re-render)
+  - **Progress tracker**: Script → Voices → Media → Compiled → QA → Review → Uploaded (+ published status)
+  - **API Keys Vault** in Settings: all 11 keys user-configurable (masked, allow-listed, hot-applied to env, persisted in db.settings, reloaded at startup)
+  - Testing: iteration_3 = 21/21 backend + 100% frontend testids
+- 2026-09-12 (session 2): Google-only login (now optional), Admin Console, Instagram Integrations page (live-validated), draft-only engagement, Improvement Coach (max 2 rounds, keep-only-if-score-improves), XTTS v2 verified live, qwen_local capability-gated provider, disk hardening (/app+/root share 9.8G; model caches moved to /var/cache)
+- Provider billing states (not code bugs): fal.ai account LOCKED (exhausted balance — fal.ai/dashboard/billing), Emergent universal key budget exceeded, OpenAI unfunded, Gemini cyclic rate limits. HF_TOKEN/REPLICATE_API_TOKEN unset → add in Settings → API Keys. Until quotas recover, videos render with procedural mandala frames + Ken Burns and Kokoro/gTTS voice.
 
 ## Backlog / Next
 - P1: Top up fal.ai balance + Emergent universal key → real AI frames/clips resume automatically via router

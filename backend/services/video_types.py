@@ -1,0 +1,68 @@
+"""Video-type registry: voice, music and visual style auto-selected per content type."""
+
+VIDEO_TYPES = {
+    "mythology_moral": {
+        "name": "Mythology & Moral Stories", "audience": "Kids + aged", "language": "hi",
+        "tone": "Warm, reverent, dramatic storytelling with dramatic pauses",
+        "voice": "kokoro:hf_alpha", "music_mood": "devotional", "music_volume": 0.16,
+        "safety_level": "general", "is_kids": False,
+        "style_prefix": "Indian miniature painting style with gold leaf details, deep indigo and saffron palette, cinematic temple lighting",
+        "cta_text": "Follow for more legendary tales",
+    },
+    "folk_horror": {
+        "name": "Regional Folk & Horror-Mystery", "audience": "Youth", "language": "bn",
+        "tone": "Suspenseful, eerie but engaging narrator for young adults",
+        "voice": "kokoro:hf_beta", "music_mood": "horror", "music_volume": 0.15,
+        "safety_level": "general", "is_kids": False,
+        "style_prefix": "Dark folk art with misty village atmosphere, deep greens and charcoal palette, moonlit cinematic lighting",
+        "cta_text": "Follow for more folk mysteries",
+    },
+    "motivational": {
+        "name": "Motivational & Life-Lesson Stories", "audience": "All ages", "language": "en",
+        "tone": "Energetic, uplifting, punchy narrator",
+        "voice": "kokoro:af_heart", "music_mood": "moral", "music_volume": 0.14,
+        "safety_level": "general", "is_kids": False,
+        "style_prefix": "Bold modern flat illustration, dynamic diagonal composition, warm sunrise gradients, high contrast",
+        "cta_text": "Follow for daily motivation",
+    },
+    "kids_fables": {
+        "name": "Kids' Animated Fables", "audience": "Kids 7+", "language": "en",
+        "tone": "Friendly, playful, animated storyteller",
+        "voice": "kokoro:af_bella", "music_mood": "happy", "music_volume": 0.14,
+        "safety_level": "strict_kids", "is_kids": True,
+        "style_prefix": "Whimsical storybook illustration, soft pastels, rounded friendly shapes, gentle magical atmosphere",
+        "cta_text": "Subscribe for more bedtime fables",
+    },
+    "educational": {
+        "name": "Educational Lecture Videos", "audience": "Students", "language": "en",
+        "tone": "Clear, calm, structured explainer",
+        "voice": "kokoro:af_nicole", "music_mood": "moral", "music_volume": 0.08,
+        "safety_level": "general", "is_kids": False,
+        "style_prefix": "Clean infographic style, whiteboard diagrams, deep navy and white with a single accent color",
+        "cta_text": "Follow for more lessons",
+    },
+    "business": {
+        "name": "Business Ideas Videos", "audience": "New entrepreneurs", "language": "en",
+        "tone": "Crisp, confident, pitch-style narration",
+        "voice": "kokoro:am_michael", "music_mood": "action", "music_volume": 0.10,
+        "safety_level": "general", "is_kids": False,
+        "style_prefix": "Sleek startup aesthetic, dark slides with a neon accent, minimal 3D shapes, professional lighting",
+        "cta_text": "Follow for more business ideas",
+    },
+    "farming": {
+        "name": "Agricultural Farming Videos", "audience": "Farmers", "language": "hi",
+        "tone": "Simple, warm, practical explainer in easy language",
+        "voice": "kokoro:hm_omega", "music_mood": "happy", "music_volume": 0.08,
+        "safety_level": "general", "is_kids": False,
+        "style_prefix": "Earthy realistic documentary style, golden fields, natural sunlight, honest textures",
+        "cta_text": "Follow for more farming guides",
+    },
+    "tech": {
+        "name": "Technology, Innovations & Discoveries", "audience": "Researchers", "language": "en",
+        "tone": "Modern, precise, curious narrator",
+        "voice": "kokoro:am_adam", "music_mood": "suspense", "music_volume": 0.10,
+        "safety_level": "general", "is_kids": False,
+        "style_prefix": "Futuristic tech aesthetic, holographic UI elements, deep blue and cyan palette, volumetric lighting",
+        "cta_text": "Follow for more breakthroughs",
+    },
+}

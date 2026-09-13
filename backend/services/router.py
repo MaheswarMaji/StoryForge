@@ -37,9 +37,10 @@ def _key(name: str) -> str:
 
 def chain(kind: str) -> list:
     order = {
-        "tts": os.environ.get("TTS_PROVIDER_ORDER", "gemini,kokoro,xtts,gtts,openai"),
-        "image": os.environ.get("IMAGE_PROVIDER_ORDER", "fal_flux,replicate_flux,emergent,gemini,openai,qwen_local,procedural"),
-        "video": os.environ.get("VIDEO_PROVIDER_ORDER", "fal_wan,replicate_wan,kenburns"),
+        "tts": os.environ.get("TTS_PROVIDER_ORDER", "kokoro,xtts,gtts,gemini,openai"),
+        "image": os.environ.get("IMAGE_PROVIDER_ORDER",
+                                "openai,hf_flux,fal_flux,replicate_flux,emergent,gemini,qwen_local,procedural"),
+        "video": os.environ.get("VIDEO_PROVIDER_ORDER", "gemini_veo,replicate_wan,fal_wan,kenburns"),
     }
     return [p.strip() for p in order[kind].split(",") if p.strip()]
 
@@ -53,6 +54,8 @@ def status() -> dict:
             "fal_flux": {"key": bool(_key("FAL_KEY")), "healthy": available("fal_flux")},
             "fal_wan": {"key": bool(_key("FAL_KEY")), "healthy": available("fal_wan")},
             "replicate": {"key": bool(_key("REPLICATE_API_TOKEN")), "healthy": available("replicate")},
+            "gemini_veo": {"key": bool(_key("GEMINI_API_KEY")), "healthy": available("gemini_veo")},
+            "hf_flux": {"key": bool(_key("HF_TOKEN")), "healthy": available("hf_flux")},
             "gemini": {"key": bool(_key("GEMINI_API_KEY")), "healthy": available("gemini")},
             "openai": {"key": bool(_key("OPENAI_API_KEY")), "healthy": available("openai")},
             "kokoro": {"key": True, "healthy": available("kokoro")},
@@ -62,13 +65,15 @@ def status() -> dict:
             "kenburns": {"key": True, "healthy": True},
             "qwen_local": {"key": True, "healthy": available("qwen_local"), "capable": _qwen_capable()},
         },
-        "notes": "Add FAL_KEY / REPLICATE_API_TOKEN to backend/.env to activate FLUX.1 images and Wan 2.1 videos; exhausted providers are benched and the router falls through to free open-source models automatically.",
+        "notes": "Slide mode image priority: OpenAI → Hugging Face FLUX.1-schnell → fal.ai. Clip mode video priority: Gemini Veo → Replicate (Wan 2.1) → fal.ai. Free local fallbacks (Kokoro/XTTS/gTTS voice, procedural frames + Ken Burns) always available. Add HF_TOKEN / FAL_KEY / REPLICATE_API_TOKEN in Settings → API Keys.",
     }
 
 
 # ---------------- TTS ----------------
 KOKORO_LANGS = {"hi", "en"}
 KOKORO_VOICES = {"hi": "hf_alpha", "en": "af_heart"}
+KOKORO_ALL = {"hf_alpha", "hf_beta", "af_heart", "af_bella", "af_nicole", "af_sky",
+              "am_adam", "am_michael", "am_echo", "hm_omega", "hm_psi"}
 XTTS_LANGS = {"hi", "en"}
 _xtts_model = None
 _pipes = {}
@@ -95,7 +100,9 @@ async def tts(text: str, voice_spec: str, lang_hint: str, out_path: Path) -> dic
             if provider == "kokoro":
                 if lang not in KOKORO_LANGS:
                     raise RuntimeError(f"kokoro lacks lang {lang}")
-                dur = await _kokoro(text, KOKORO_VOICES.get(lang, "af_heart"), out_path)
+                spec_voice = (voice_spec or "").split(":", 1)[1] if (voice_spec or "").startswith("kokoro:") else ""
+                voice = spec_voice if spec_voice in KOKORO_ALL else KOKORO_VOICES.get(lang, "af_heart")
+                dur = await _kokoro(text, voice, out_path)
                 _ok(provider)
                 return {"provider": provider, "duration": dur}
 
@@ -204,6 +211,73 @@ async def _qwen_image(prompt: str, ref_image: Path = None) -> bytes:
     return await asyncio.to_thread(run)
 
 
+async def _hf_image(prompt: str) -> bytes:
+    """Hugging Face free inference — FLUX.1-schnell (free tier, needs HF_TOKEN)."""
+    token = _key("HF_TOKEN")
+    if not token:
+        raise RuntimeError("HF_TOKEN not set (add it in Settings → API Keys)")
+    import httpx
+
+    model = os.environ.get("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell")
+    urls = [f"https://router.huggingface.co/hf-inference/models/{model}",
+            f"https://api-inference.huggingface.co/models/{model}"]
+    last = None
+    async with httpx.AsyncClient(timeout=120) as client:
+        for url in urls:
+            r = await client.post(url, headers={"Authorization": f"Bearer {token}"},
+                                  json={"inputs": prompt[:800]})
+            if r.status_code == 200 and r.content[:3] in (b"\x89PN", b"\xff\xd8\xff"):
+                return r.content
+            last = f"{r.status_code} {r.text[:100]}"
+    raise RuntimeError(f"hf flux failed: {last}")
+
+
+async def _veo_video(prompt: str, duration: float) -> bytes:
+    """Gemini API Veo (paid tier) — LRO submit + poll + download; falls through on quota errors."""
+    import httpx
+
+    key = _key("GEMINI_API_KEY")
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY not set")
+    base = "https://generativelanguage.googleapis.com/v1beta"
+    headers = {"x-goog-api-key": key}
+    models = ["veo-3.1-fast-generate-preview", "veo-3.0-generate-001", "veo-3.0-fast-generate-001"]
+    last = None
+    async with httpx.AsyncClient(timeout=120) as client:
+        for model in models:
+            try:
+                r = await client.post(
+                    f"{base}/models/{model}:predictLongRunning", headers=headers,
+                    json={"instances": [{"prompt": prompt[:1500]}],
+                          "parameters": {"sampleCount": 1, "aspectRatio": "9:16"}})
+                r.raise_for_status()
+                op = r.json().get("name")
+                if not op:
+                    raise RuntimeError("no operation name")
+                for _ in range(80):
+                    s = await client.get(f"{base}/{op}", headers=headers)
+                    d = s.json()
+                    if d.get("error"):
+                        raise RuntimeError(str(d["error"])[:140])
+                    if d.get("done"):
+                        uri = (d.get("response", {}).get("generateVideoResponse", {})
+                               .get("generatedSamples") or [{}])[0].get("video", {}).get("uri")
+                        if not uri:
+                            raise RuntimeError("veo: no video uri")
+                        dl = await client.get(uri, headers=headers, timeout=300, follow_redirects=True)
+                        dl.raise_for_status()
+                        return dl.content
+                    await asyncio.sleep(8)
+                raise RuntimeError("veo timeout")
+            except httpx.HTTPStatusError as e:
+                last = f"{model}: {e.response.status_code}"
+                continue
+            except Exception as e:
+                last = f"{model}: {str(e)[:100]}"
+                continue
+    raise RuntimeError(f"veo exhausted: {last}")
+
+
 async def image(prompt: str, out_path: Path, ref_image: Path = None, session: str = "img") -> dict:
     from services import imagegen
 
@@ -219,6 +293,12 @@ async def image(prompt: str, out_path: Path, ref_image: Path = None, session: st
                 return {"provider": provider}
             if provider == "replicate_flux":
                 data = await _replicate_image(prompt)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_bytes(data)
+                _ok(provider)
+                return {"provider": provider}
+            if provider == "hf_flux":
+                data = await _hf_image(prompt)
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_bytes(data)
                 _ok(provider)
@@ -323,6 +403,12 @@ async def video(prompt: str, ref_image: Path, out_path: Path, duration: float = 
         if not available(provider):
             continue
         try:
+            if provider == "gemini_veo":
+                data = await _veo_video(prompt, duration)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_bytes(data)
+                _ok(provider)
+                return {"provider": provider}
             if provider == "fal_wan":
                 data = await _fal_video(prompt, duration)
                 out_path.parent.mkdir(parents=True, exist_ok=True)
