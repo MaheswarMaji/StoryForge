@@ -117,3 +117,49 @@ async def overview(request: Request):
         "youtube_channel": ch or {},
         "notes": "Revenue is an ESTIMATE (views x RPM, set YT_RPM_USD in backend/.env). Exact payouts require YouTube Analytics/AdSense access. Per-video views/likes/comments come live from the YouTube Data API.",
     }
+
+
+@admin_router.get("/youtube/live")
+async def youtube_live(request: Request, refresh: int = 0):
+    """Live YouTube channel + per-video analytics from the YouTube Data & Analytics APIs
+    (10-minute server-side cache keeps the Data API quota safe)."""
+    import time as _t
+
+    from services import social
+
+    await verify_admin(request)
+    if not social.cred_status()["youtube"]:
+        raise HTTPException(400, "YouTube not connected — complete the OAuth flow in Settings first")
+    if not refresh:
+        doc = await db.yt_cache.find_one({"key": "live"})
+        if doc and doc.get("data") and _t.time() - (doc.get("ts") or 0) < 600:
+            out = dict(doc["data"])
+            out["cached"] = True
+            out["age_sec"] = int(_t.time() - doc["ts"])
+            return out
+
+    story_by_videoid = {}
+    async for s in db.stories.find({"publish.youtube.video_id": {"$exists": True, "$ne": ""}}):
+        y = (s.get("publish") or {}).get("youtube") or {}
+        story_by_videoid[y["video_id"]] = {
+            "story_id": s["id"], "cost": (s.get("cost") or {}).get("total", 0)}
+
+    data = {"channel": {}, "videos": [], "analytics": {"scope_ok": False}, "cached": False}
+    try:
+        data["channel"] = await _to_thread(social.yt_channel_info)
+        vids = await _to_thread(social.yt_channel_uploads, 30)
+    except Exception as e:
+        raise HTTPException(502, f"YouTube API error: {str(e)[:200]}")
+    for v in vids:
+        v.update(story_by_videoid.get(v["video_id"], {}))
+    data["videos"] = vids
+    try:
+        data["analytics"] = await _to_thread(social.yt_analytics_28d)
+    except Exception as e:
+        data["analytics"] = {"scope_ok": False, "note": str(e)[:180]}
+
+    data["rpm_used"] = float(os.environ.get("YT_RPM_USD", "0.05"))
+    data["fetched_at"] = datetime.now(timezone.utc).isoformat()
+    await db.yt_cache.update_one(
+        {"key": "live"}, {"$set": {"key": "live", "ts": _t.time(), "data": data}}, upsert=True)
+    return data

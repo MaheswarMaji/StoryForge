@@ -41,7 +41,7 @@ async def list_channels():
 @router.put("/channels/{channel_id}")
 async def update_channel(channel_id: str, body: dict):
     allowed = {"name", "description", "language", "tone", "voice", "voice_speed", "music_mood",
-               "music_volume", "safety_level", "style_prefix", "cta_text", "is_kids"}
+               "music_volume", "safety_level", "style_prefix", "cta_text", "is_kids", "expressive_voice"}
     patch = {k: v for k, v in body.items() if k in allowed}
     res = await db.channels.update_one({"_id": channel_id}, {"$set": patch})
     if res.matched_count == 0:
@@ -711,3 +711,153 @@ async def router_status():
 @router.get("/media-health")
 async def media_health():
     return {"media_root": str(MEDIA_ROOT), "exists": MEDIA_ROOT.exists()}
+
+
+# ---------- stitch my own media ----------
+STITCH_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+STITCH_VIDEO_EXTS = {".mp4", ".mov", ".webm", ".avi", ".m4v"}
+STITCH_MAX_FILE = 150 * 1024 * 1024
+STITCH_MAX_TOTAL = 250 * 1024 * 1024
+
+
+@router.post("/stitch/upload")
+async def stitch_upload(file: UploadFile = File(...)):
+    import uuid
+
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in (STITCH_IMAGE_EXTS | STITCH_VIDEO_EXTS):
+        raise HTTPException(400, "file must be an image (jpg/png/webp) or video (mp4/mov/webm/avi)")
+    data = await file.read()
+    if len(data) > STITCH_MAX_FILE:
+        raise HTTPException(400, "file too large (max 150MB)")
+    media_id = uuid.uuid4().hex[:16]
+    dst = MEDIA_ROOT / "stitch" / f"{media_id}{ext}"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(data)
+    kind = "video" if ext in STITCH_VIDEO_EXTS else "image"
+    from services import media, storage
+    try:  # mirror the upload to object storage so the local copy isn't the only one
+        storage.put_object(f"{storage.APP_NAME}/stitch/{media_id}{ext}", data,
+                           "video/mp4" if kind == "video" else "image/jpeg")
+    except Exception as e:
+        print(f"[stitch] object-storage mirror failed (keeping local copy): {str(e)[:120]}", flush=True)
+    return {"media_id": media_id, "kind": kind, "size": len(data),
+            "duration": round(media.ffprobe_duration(dst), 2) if kind == "video" else None}
+
+
+class StitchItemIn(BaseModel):
+    media_id: str
+    narration: str = ""
+    duration: Optional[float] = None
+
+
+class StitchBody(BaseModel):
+    title: str = ""
+    video_type: str = "mythology_moral"
+    items: List[StitchItemIn]
+    music: bool = True
+    endcard: bool = True
+    beat_sync: bool = True
+
+
+@router.post("/stitch")
+async def stitch_create(body: StitchBody):
+    import re
+
+    from services.video_types import VIDEO_TYPES
+
+    if not body.items:
+        raise HTTPException(400, "upload at least one image or video clip")
+    if len(body.items) > 30:
+        raise HTTPException(400, "max 30 media items per video")
+    cfg = VIDEO_TYPES.get(body.video_type)
+    if not cfg:
+        raise HTTPException(400, "unknown video_type")
+
+    chunks, total = [], 0
+    for it in body.items:
+        if not re.fullmatch(r"[0-9a-f]{16}", it.media_id):
+            raise HTTPException(400, "invalid media_id")
+        srcs = sorted((MEDIA_ROOT / "stitch").glob(f"{it.media_id}.*"))
+        if not srcs:
+            raise HTTPException(404, f"upload not found: {it.media_id} — re-upload the file")
+        src = srcs[0]
+        total += src.stat().st_size
+        kind = "video" if src.suffix.lower() in STITCH_VIDEO_EXTS else "image"
+        dur = None
+        if kind == "image":
+            dur = max(1.0, min(20.0, float(it.duration or 4.0)))
+        elif it.duration:
+            dur = max(1.0, min(60.0, float(it.duration)))
+        chunks.append({"voiceover": (it.narration or "").strip()[:2000],
+                       "media_path": str(src), "media_kind": kind, "duration": dur,
+                       "beat": "story", "camera": "zoom_in"})
+    if total > STITCH_MAX_TOTAL:
+        raise HTTPException(400, "total media too large (max 250MB per video)")
+
+    key = f"vt-{body.video_type}"
+    ch = await db.channels.find_one({"key": key})
+    if not ch:
+        ch_doc = Channel(key=key, name=cfg["name"],
+                         description=f"{cfg['name']} ({cfg['audience']}) — voice & music auto-selected",
+                         language=cfg["language"], tone=cfg["tone"], voice=cfg["voice"],
+                         music_mood=cfg["music_mood"], music_volume=cfg["music_volume"],
+                         safety_level=cfg["safety_level"], is_kids=cfg["is_kids"],
+                         style_prefix=cfg["style_prefix"], cta_text=cfg["cta_text"],
+                         mode="slide", video_type=body.video_type)
+        await db.channels.insert_one(ch_doc.to_mongo())
+        ch = await db.channels.find_one({"key": key})
+
+    story = Story(book_id=f"stitch-{utcnow().strftime('%Y%m%d-%H%M%S')}", channel_id=ch["_id"],
+                  title_hindi=body.title.strip(),
+                  title_english=body.title.strip()[:100] or "My stitched video",
+                  source="Uploaded images & clips", category=cfg["name"], mode="stitch",
+                  target_audience=cfg["audience"], visual_style=cfg["style_prefix"][:120],
+                  script={"chunks": chunks, "music": body.music, "endcard": body.endcard,
+                          "beat_sync": body.beat_sync},
+                  status="script_ready", stage="Queued for stitching")
+    await db.stories.insert_one(story.to_mongo())
+    job_id = await enqueue("produce", story.id, f"Stitch: {(body.title or 'my media')[:40]}")
+    return {"story_id": story.id, "job_id": job_id}
+
+
+# ---------- voice preview ----------
+PREVIEW_LINES = {"hi": "नमस्कार! यह आवाज़ आपकी हर कहानी को जीवंत कर देगी।",
+                 "bn": "নমস্কার! এই কণ্ঠই আপনার গল্পকে প্রাণ দেবে।",
+                 "en": "Hi! This is exactly how your stories will sound."}
+
+
+class VoicePreviewBody(BaseModel):
+    voice: str = ""
+    language: str = "hi"
+    tone: str = ""
+
+
+@router.post("/tts/preview")
+async def tts_preview(body: VoicePreviewBody):
+    """Short expressive sample of a voice so it can be auditioned before rendering (cached)."""
+    import hashlib
+
+    from services import media
+
+    lang = (body.language or "hi").split("-")[0]
+    text = PREVIEW_LINES.get(lang, PREVIEW_LINES["en"])
+    key = hashlib.sha1(f"{body.voice}|{lang}|{body.tone}".encode()).hexdigest()[:12]
+    out = MEDIA_ROOT / "tmp" / f"voice-preview-{key}.mp3"
+    lock = _PREVIEW_LOCKS.setdefault(key, asyncio.Lock())
+    if not out.exists() or out.stat().st_size == 0:
+        async with lock:
+            if not out.exists() or out.stat().st_size == 0:
+                direction = (body.tone or "").strip() or "warm dramatic storyteller, medium pace"
+                try:
+                    await media.synthesize_voice(text, body.voice, 1.0, out, lang_hint=lang,
+                                                 direction=direction, expressive=True)
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    out.unlink(missing_ok=True)
+                    raise HTTPException(502, f"voice preview failed: {str(e)[:160]}")
+    return {"url": f"/api/media/tmp/{out.name}", "voice": body.voice, "language": lang}
+
+
+_PREVIEW_LOCKS: dict = {}

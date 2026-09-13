@@ -44,6 +44,7 @@ class Channel(BaseDocument):
     style_prefix: str = ""
     cta_text: str = ""
     is_kids: bool = False
+    expressive_voice: bool = True
     mode: str = "slide"
     video_type: str = ""
     created_at: datetime = Field(default_factory=utcnow)

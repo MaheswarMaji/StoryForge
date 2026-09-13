@@ -69,7 +69,8 @@ OPENAI_VOICES = {"alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage
 
 
 async def synthesize_voice(text: str, voice: str, speed: float, out_path: Path,
-                           lang_hint: str = None) -> float:
+                           lang_hint: str = None, direction: str = None,
+                           expressive: bool = False) -> float:
     """Routes TTS through the provider chain (quota APIs first, open-source fallbacks)."""
     from services import router
 
@@ -79,7 +80,8 @@ async def synthesize_voice(text: str, voice: str, speed: float, out_path: Path,
         lang_hint = {"charon": "hi", "kore": "bn", "leda": "bn", "aoede": "hi"}.get(
             v.split(":", 1)[-1], "hi" if v.startswith("gemini:") else "en")
     clean = " ".join(str(text).split())[:3500]
-    res = await router.tts(clean, voice or "", lang_hint, out_path)
+    res = await router.tts(clean, voice or "", lang_hint, out_path,
+                           direction=direction, expressive=expressive, speed=speed)
     return res["duration"]
 
 
@@ -120,19 +122,25 @@ async def gtts_tts(text: str, lang: str, out_path: Path) -> float:
 
 async def compose_ai_clip(ai_video: Path, narration: Path, caption: Path, out: Path, dur: float,
                           hook_card: Path = None):
-    """Trim/loop an AI-generated video to the narration length, burn captions and mix voice."""
+    """Trim/loop a video (AI or user-uploaded) to the narration length, burn captions and mix voice."""
     out.parent.mkdir(parents=True, exist_ok=True)
     fade_out = max(0.0, dur - 0.35)
     fc = (
         f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
         f"fps={FPS},eq=saturation=1.1:contrast=1.04,"
-        f"fade=t=in:st=0:d=0.25,fade=t=out:st={fade_out:.2f}:d=0.32[bg];"
-        f"[2:v]scale=960:-1[cap];[bg][cap]overlay=(W-w)/2:H-h-250[v]"
+        f"fade=t=in:st=0:d=0.25,fade=t=out:st={fade_out:.2f}:d=0.32[bg]"
     )
+    inputs = ["-stream_loop", "-1", "-i", str(ai_video), "-i", str(narration)]
+    idx = 2
+    if caption and Path(caption).exists():
+        inputs += ["-i", str(caption)]
+        fc += f";[{idx}:v]scale=960:-1[cap];[bg][cap]overlay=(W-w)/2:H-h-250[v]"
+        idx += 1
+    else:
+        fc += ";[bg]null[v]"
     vmap = "[v]"
-    inputs = ["-stream_loop", "-1", "-i", str(ai_video), "-i", str(narration), "-i", str(caption)]
     if hook_card and Path(hook_card).exists():
-        fc += f";[3:v]scale={W}:-1[hook];[v][hook]overlay=(W-w)/2:150:enable='lte(t,2.6)'[v2]"
+        fc += f";[{idx}:v]scale={W}:-1[hook];[v][hook]overlay=(W-w)/2:150:enable='lte(t,2.6)'[v2]"
         vmap = "[v2]"
         inputs += ["-i", str(hook_card)]
     proc = await asyncio.create_subprocess_exec(
@@ -339,17 +347,24 @@ async def make_segment_clip(frame: Path, narration: Path, caption: Path, out: Pa
         f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
         f"zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={W}x{H}:fps={FPS},"
         f"eq=saturation=1.14:contrast=1.05,vignette=PI/5,"
-        f"fade=t=in:st=0:d=0.25,fade=t=out:st={fade_out:.2f}:d=0.32[bg];"
-        f"[2:v]scale=960:-1[cap];[bg][cap]overlay=(W-w)/2:H-h-250[v]"
+        f"fade=t=in:st=0:d=0.25,fade=t=out:st={fade_out:.2f}:d=0.32[bg]"
     )
-    extra = ""
+    inputs = ["-i", str(frame)]
+    if narration and Path(narration).exists():
+        inputs += ["-i", str(narration)]
+    else:  # silent slide — synthetic silent track keeps the concat muxer happy
+        inputs += ["-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate={SR}"]
+    idx = 2
+    if caption and Path(caption).exists():
+        inputs += ["-i", str(caption)]
+        fc += f";[{idx}:v]scale=960:-1[cap];[bg][cap]overlay=(W-w)/2:H-h-250[v]"
+        idx += 1
+    else:
+        fc += ";[bg]null[v]"
+    vmap = "[v]"
     if hook_card and Path(hook_card).exists():
-        fc += (
-            f";[3:v]scale={W}:-1[hook];[v][hook]overlay=(W-w)/2:150:"
-            f"enable='lte(t,2.6)'[v2]")
-    vmap = "[v2]" if hook_card and Path(hook_card).exists() else "[v]"
-    inputs = ["-i", str(frame), "-i", str(narration), "-i", str(caption)]
-    if hook_card and Path(hook_card).exists():
+        fc += f";[{idx}:v]scale={W}:-1[hook];[v][hook]overlay=(W-w)/2:150:enable='lte(t,2.6)'[v2]"
+        vmap = "[v2]"
         inputs += ["-i", str(hook_card)]
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg", "-y", *inputs,
@@ -499,4 +514,72 @@ def overlay_title_on_image(base_img: Path, title: str, subtitle: str, out_path: 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.convert("RGB").save(out_path, quality=90)
     return out_path
+
+
+# ---------- expressive narration helpers (stitch + humanize) ----------
+HUMANIZE_TEMPO = {"slow": 0.94, "medium": 1.0, "fast": 1.06}
+ECHO_EMOTIONS = ("sad", "suspense", "horror", "mystery", "ghost", "melancholy", "eerie")
+
+
+def _has_audio_stream(path: Path) -> bool:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+         "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True,
+    )
+    return bool(out.stdout.strip())
+
+
+async def stitch_video_clip(src: Path, out: Path, dur: float):
+    """User-uploaded clip → 9:16 normalized, original audio kept (or silence), looped/trimmed to dur."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fade_out = max(0.0, dur - 0.35)
+    vf = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},"
+          f"eq=saturation=1.08:contrast=1.03,"
+          f"fade=t=in:st=0:d=0.25,fade=t=out:st={fade_out:.2f}:d=0.32")
+    args = ["ffmpeg", "-y", "-stream_loop", "-1", "-i", str(src)]
+    if _has_audio_stream(src):
+        args += ["-vf", vf, "-af", "apad", "-map", "0:v", "-map", "0:a"]
+    else:
+        args += ["-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate={SR}",
+                 "-shortest", "-vf", vf, "-map", "0:v", "-map", "1:a"]
+    args += ["-t", f"{dur:.2f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
+             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+             str(out) + ".tmp.mp4"]
+    proc = await asyncio.create_subprocess_exec(
+        *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    _, err = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg stitch clip failed: {err.decode()[-600:]}")
+    os.replace(str(out) + ".tmp.mp4", str(out))
+
+
+async def humanize_audio(src: Path, dst: Path, direction: str = "", speed: float = 1.0) -> float:
+    """Prosody post-processing so free/local TTS stops sounding monotonic:
+    per-emotion tempo, gentle echo for suspense/sad moods, dynamic-range compression."""
+    d = (direction or "").lower()
+    pace = next((p for p in ("slow", "medium", "fast") if f"{p} pace" in d), "medium")
+    tempo = HUMANIZE_TEMPO[pace] * max(0.5, min(2.0, speed or 1.0))
+    filters = [f"atempo={max(0.5, min(2.0, tempo)):.3f}",
+               "acompressor=threshold=-26dB:ratio=3:attack=8:release=180:makeup=2"]
+    if any(e in d for e in ECHO_EMOTIONS):
+        filters.append("aecho=0.7:0.28:45:0.22")
+    filters.append("alimiter=limit=0.97")
+    tmp = Path(f"{dst}.hum{dst.suffix or '.wav'}")
+    try:
+        codec = ["-c:a", "libmp3lame", "-q:a", "2"] if dst.suffix == ".mp3" else ["-c:a", "pcm_s16le"]
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", str(src), "-af", ",".join(filters),
+            "-ar", "44100", "-ac", "2", *codec, str(tmp),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        _, err = await proc.communicate()
+        if proc.returncode != 0:
+            print(f"[media] humanize skipped: {err.decode()[-140:]}", flush=True)
+            tmp.unlink(missing_ok=True)
+            return ffprobe_duration(src)
+        os.replace(tmp, dst)
+        return ffprobe_duration(dst)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        return ffprobe_duration(src)
 

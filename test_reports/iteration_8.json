@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 8 validates the three new features end-to-end: (1) Stitch pipeline — 20/20 pytest tests pass including full E2E: uploaded 2 PNGs + 1 tiny mp4 → POST /api/stitch → polled to in_review in ~2 min (story 6aa66d2907c6c0f8bc93e391, final 9.1s, HEAD 200 494KB, thumbnail 200 21KB, 0 leaked originals in /app/backend/media/stitch). Validation: .txt/.pdf → 400, empty items → 400, bogus media_id → 404. Prior stories 6aa66ac00cdbbc6fd4060168 (15.2s) and 6aa66b8558ffb9fdd5448232 (7.0s) both in_review with fetchable finals + thumbs. (2) Expressive TTS — /api/router-status.tts_chain[0] == 'gemini_expr' as specified, provider registered with GEMINI_API_KEY. Direct services.router.tts(...) with expressive=True and Hindi text produced a valid audio file (ffprobe duration > 0.3s). Channel expressive_voice PUT persists and toggles cleanly (verified via API + UI reload). (3) Live YouTube Analytics — GET /api/admin/youtube/live: no auth → 401; admin bearer/cookie → 400 with detail 'YouTube not connected — complete the OAuth flow in Settings first'; refresh=1 still 400, no stack traces leaked. Frontend: /create both tabs render with all documented data-testids (create-tab-ai, create-tab-media, stitch-upload-zone, stitch-file-input, stitch-item-row, stitch-item-narration-0, stitch-item-duration-0, stitch-submit-button); set_input_files created 2 rows with narration + duration inputs; submit enabled. /channels expressive switch (channel-expressive-switch) toggles on Save, state persists across reload. /admin yt-live-card renders with connect note, Fetch now button, no horizontal overflow, no stack traces (only the expected 400 from unconnected OAuth). Regression: /api/dashboard, /api/stories, /api/video-types, /api/router-status all 200; queue pause/unpause works with body {paused:bool}; existing story 6aa64eae73f022d9503eb153 still returns media.final.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration8_stitch_expressive_yt.py",
+    "/app/test_reports/pytest/iteration8.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes.py line 720: STITCH_MAX_TOTAL check runs AFTER all files have been globbed but not until the loop finishes; consider computing total during upload rather than at stitch-create time so oversized batches fail earlier (currently a user can upload 2×150MB fine then get 400 at /api/stitch).",
+    "routes.py L797: stitch_create silently forces mode='stitch' but the enqueued job type is 'produce' which then branches in pipeline.produce_video on mode=='stitch' — code path is fine but the coupling is implicit; a distinct 'stitch' job type would be clearer.",
+    "admin.py L152 raises HTTPException(502) if yt_channel_info fails after the connect check passes — no fallback and no cache use; a partial-success response (channel info missing but analytics returned) would be more resilient.",
+    "services/router.py L106 humanize_audio runs after each provider's TTS synchronously; for slide renders with 10+ chunks this doubles wall time. Consider batching or making humanize opt-in per chunk.",
+    "The 401 console errors on /create and /channels come from unauthenticated calls to admin-guarded endpoints (harmless but noisy in DevTools); consider guarding those fetches with a session probe."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration8_stitch_expressive_yt.py"],
+  "success_rate": {"backend": "100% (20/20 pytest + E2E stitch render passed)", "frontend": "100% (all data-testids present, flows work, no overflow, no unexpected console errors)"},
+  "test_credentials": "Bearer qa_admin_test-admin-4447 (admin role, session valid until 2026-09-20).",
+  "seed_data_creation": "Created story 6aa66d2907c6c0f8bc93e391 (E2E stitch, 3 items, final 9.1s, in_review, no music/endcard, thumbnail present). No user or channel seed data added.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration8_stitch_expressive_yt.py is a full regression for stitch+expressive+yt-live+queue. Uses admin bearer qa_admin_test-admin-4447. Runs in ~10s (does NOT rerun the E2E render — that was a one-shot manual verify via /tmp/e2e_stitch.py). If retesting E2E stitch: reuse the /tmp/e2e_stitch.py pattern (create tiny PNG/mp4 via PIL/ffmpeg, upload, POST /api/stitch, poll /api/stories/{id} for in_review — takes ~2 min per render). Do NOT trigger AI produce jobs (quota).",
+  "rca_of_the_issue": "N/A — no issues found this iteration."
+}

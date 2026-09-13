@@ -37,7 +37,7 @@ def _key(name: str) -> str:
 
 def chain(kind: str) -> list:
     order = {
-        "tts": os.environ.get("TTS_PROVIDER_ORDER", "kokoro,xtts,gtts,gemini,openai"),
+        "tts": os.environ.get("TTS_PROVIDER_ORDER", "gemini_expr,kokoro,xtts,gtts,gemini,openai"),
         "image": os.environ.get("IMAGE_PROVIDER_ORDER",
                                 "openai,stability,hf_flux,fal_flux,replicate_flux,emergent,gemini,qwen_local,pexels,procedural"),
         "video": os.environ.get("VIDEO_PROVIDER_ORDER", "gemini_veo,replicate_wan,fal_wan,pexels_video,kenburns"),
@@ -58,6 +58,7 @@ def status() -> dict:
             "hf_flux": {"key": bool(_key("HF_TOKEN")), "healthy": available("hf_flux")},
             "stability": {"key": bool(_key("STABILITY_API_KEY")), "healthy": available("stability")},
             "gemini": {"key": bool(_key("GEMINI_API_KEY")), "healthy": available("gemini")},
+            "gemini_expr": {"key": bool(_key("GEMINI_API_KEY")), "healthy": available("gemini_expr")},
             "openai": {"key": bool(_key("OPENAI_API_KEY")), "healthy": available("openai")},
             "kokoro": {"key": True, "healthy": available("kokoro")},
             "xtts": {"key": True, "healthy": available("xtts")},
@@ -82,21 +83,48 @@ _xtts_model = None
 _pipes = {}
 
 
-async def tts(text: str, voice_spec: str, lang_hint: str, out_path: Path) -> dict:
+GEMINI_VOICE_FOR = {
+    "hf_alpha": "Aoede", "hf_beta": "Leda", "af_heart": "Kore", "af_bella": "Kore",
+    "af_nicole": "Aoede", "af_sky": "Aoede", "am_adam": "Charon", "am_michael": "Charon",
+    "am_echo": "Fenrir", "hm_omega": "Charon", "hm_psi": "Puck", "onyx": "Charon",
+    "nova": "Puck", "coral": "Aoede", "fable": "Leda", "sage": "Charon", "echo": "Charon",
+    "alloy": "Aoede", "ash": "Fenrir", "shimmer": "Aoede",
+}
+HUMANIZE_PROVIDERS = {"kokoro", "xtts", "gtts", "openai"}
+
+
+async def tts(text: str, voice_spec: str, lang_hint: str, out_path: Path,
+              direction: str = None, expressive: bool = False, speed: float = 1.0) -> dict:
     from services import gemini
-    from services.media import ffprobe_duration
+    from services.media import ffprobe_duration, humanize_audio
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     lang = (lang_hint or "hi").split("-")[0]
+
+    async def finish(provider: str, dur: float) -> dict:
+        # local/free voices get prosody post-processing so they stop sounding monotonic
+        if provider in HUMANIZE_PROVIDERS and expressive and direction:
+            dur = await humanize_audio(out_path, out_path, direction, speed=speed)
+        return {"provider": provider, "duration": dur}
 
     for provider in chain("tts"):
         if not available(provider):
             continue
         try:
+            if provider == "gemini_expr":
+                if not expressive or not gemini.gemini_key():
+                    raise RuntimeError("gemini_expr not applicable")
+                spec = (voice_spec or "").split(":", 1)[-1] if ":" in (voice_spec or "") else (voice_spec or "")
+                gv = GEMINI_VOICE_FOR.get((spec or "").lower(), "Aoede")
+                dur = await gemini.tts(text, gv, out_path, direction=direction)
+                _ok(provider)
+                return {"provider": provider, "duration": dur}
+
             if provider == "gemini":
                 if not (voice_spec or "").startswith("gemini:") or not gemini.gemini_key():
                     raise RuntimeError("gemini tts not applicable")
-                dur = await gemini.tts(text, voice_spec.split(":", 1)[1] or "Kore", out_path)
+                dur = await gemini.tts(text, voice_spec.split(":", 1)[1] or "Kore", out_path,
+                                       direction=direction)
                 _ok(provider)
                 return {"provider": provider, "duration": dur}
 
@@ -107,26 +135,26 @@ async def tts(text: str, voice_spec: str, lang_hint: str, out_path: Path) -> dic
                 voice = spec_voice if spec_voice in KOKORO_ALL else KOKORO_VOICES.get(lang, "af_heart")
                 dur = await _kokoro(text, voice, out_path)
                 _ok(provider)
-                return {"provider": provider, "duration": dur}
+                return await finish(provider, dur)
 
             if provider == "xtts":
                 if lang not in XTTS_LANGS:
                     raise RuntimeError(f"xtts lacks lang {lang}")
                 dur = await _xtts(text, lang, out_path)
                 _ok(provider)
-                return {"provider": provider, "duration": dur}
+                return await finish(provider, dur)
 
             if provider == "gtts":
                 from services.media import gtts_tts
                 dur = await gtts_tts(text, lang, out_path)
                 _ok(provider)
-                return {"provider": provider, "duration": dur}
+                return await finish(provider, dur)
 
             if provider == "openai":
                 from services.media import openai_tts
                 dur = await openai_tts(text, voice_spec, out_path)
                 _ok(provider)
-                return {"provider": provider, "duration": dur}
+                return await finish(provider, dur)
         except Exception as e:
             _fail(provider)
             print(f"[router] tts:{provider} failed -> next: {str(e)[:110]}", flush=True)
@@ -293,7 +321,8 @@ async def _veo_video(prompt: str, duration: float) -> bytes:
     raise RuntimeError(f"veo exhausted: {last}")
 
 
-async def image(prompt: str, out_path: Path, ref_image: Path = None, session: str = "img") -> dict:
+async def image(prompt: str, out_path: Path, ref_image: Path = None, session: str = "img",
+                query_hint: str = None) -> dict:
     from services import imagegen
 
     for provider in chain("image"):
@@ -332,13 +361,20 @@ async def image(prompt: str, out_path: Path, ref_image: Path = None, session: st
                 return {"provider": provider}
             if provider == "pexels":
                 from services import pexels
-                if not await pexels.fetch_photo(prompt, out_path):
+                if not await pexels.fetch_photo(query_hint or prompt, out_path):
                     raise RuntimeError("pexels: no match")
                 _ok(provider)
                 return {"provider": provider}
-            if provider in ("gemini", "emergent", "openai", "procedural"):
-                res = await imagegen.generate_image(prompt, out_path, ref_image=ref_image, session=session)
-                return {"provider": f"{provider}", "ai": res}
+            if provider == "procedural":
+                await imagegen.generate_image(prompt, out_path, ref_image=ref_image, session=session)
+                return {"provider": "procedural", "ai": False}
+            if provider in ("gemini", "emergent", "openai"):
+                ai = await imagegen.generate_image(prompt, out_path, ref_image=ref_image, session=session)
+                if ai:
+                    return {"provider": provider, "ai": True}
+                # imagegen fell through to its local fallback — keep trying the remaining
+                # providers in the chain (pexels etc.) so real imagery still wins
+                continue
         except Exception as e:
             _fail(provider)
             print(f"[router] image:{provider} failed -> next: {str(e)[:110]}", flush=True)
@@ -431,7 +467,7 @@ async def video(prompt: str, ref_image: Path, out_path: Path, duration: float = 
             continue
         try:
             if provider == "gemini_veo":
-                data = await _veo_video(prompt, duration)
+                data = await asyncio.wait_for(_veo_video(prompt, duration), timeout=45)
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_bytes(data)
                 _ok(provider)

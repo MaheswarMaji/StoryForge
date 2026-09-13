@@ -41,6 +41,8 @@ async def produce_video(story_id: str, setp, job_id=""):
         raise RuntimeError("story has no script — generate the script first")
     chunks = chunks[:24]
     mode = story.get("mode") or (channel.get("mode") or "slide")
+    if mode == "stitch":
+        return await produce_stitch(story_id, setp, job_id)
     aid = story_id
 
     async def set_story(**kw):
@@ -142,7 +144,10 @@ async def produce_video(story_id: str, setp, job_id=""):
             else:
                 adur = await media.synthesize_voice(
                     chunk.get("voiceover", ""), channel.get("voice", ""),
-                    channel.get("voice_speed", 1.0), aud, lang_hint=channel.get("language", "hi"))
+                    channel.get("voice_speed", 1.0), aud, lang_hint=channel.get("language", "hi"),
+                    direction=f"{chunk.get('emotion') or 'storytelling'} emotion, "
+                              f"{chunk.get('pace') or 'medium'} pace",
+                    expressive=channel.get("expressive_voice", True))
                 await _save_cost(story_id, "tts", media.tts_cost(chunk.get("voiceover", "")))
             dur = max(6.0, min(16.0, adur + 0.6))
 
@@ -152,7 +157,8 @@ async def produce_video(story_id: str, setp, job_id=""):
                     f"{style}. {chunk.get('video_prompt', chunk.get('visual', ''))} "
                     f"Vertical 9:16 composition, cinematic, highly detailed, no text, no watermark. "
                     f"Recurring character appearance MUST match this reference sheet exactly: {anchor[:600]}",
-                    frame, ref_image=char_path, session=f"frame-{aid}-{i}")
+                    frame, ref_image=char_path, session=f"frame-{aid}-{i}",
+                    query_hint=chunk.get("video_prompt") or chunk.get("visual") or "")
                 if res.get("provider") not in ("procedural",):
                     await _save_cost(story_id, "image", media.IMAGE_PRICE)
 
@@ -274,6 +280,8 @@ async def produce_video(story_id: str, setp, job_id=""):
 
     audio_urls.sort(key=lambda t: t[0])
     frame_urls.sort(key=lambda t: t[0])
+    for inter in (main, mixed):  # intermediates — final + segments can rebuild them
+        Path(inter).unlink(missing_ok=True)
     await set_story(
         status="in_review", stage="Awaiting review",
         qa=qa if isinstance(qa, dict) else {},
@@ -307,7 +315,10 @@ async def regenerate_segment(story_id: str, index: int, setp):
     aud = audio_dir / f"{index:02d}.mp3"
     adur = await media.synthesize_voice(chunk.get("voiceover", ""), channel.get("voice", ""),
                                         channel.get("voice_speed", 1.0), aud,
-                                        lang_hint=channel.get("language", "hi"))
+                                        lang_hint=channel.get("language", "hi"),
+                                        direction=f"{chunk.get('emotion') or 'storytelling'} emotion, "
+                                                  f"{chunk.get('pace') or 'medium'} pace",
+                                        expressive=channel.get("expressive_voice", True))
     await _save_cost(story_id, "tts", media.tts_cost(chunk.get("voiceover", "")))
     dur = max(6.0, min(16.0, adur + 0.6))
 
@@ -343,6 +354,8 @@ async def regenerate_segment(story_id: str, index: int, setp):
         await media.make_endcard_clip(end_png, end_clip)
     final = MEDIA_ROOT / "final" / f"{aid}.mp4"
     await media.concat_clips([mixed, end_clip], final)
+    for inter in (main, mixed):  # intermediates are rebuildable
+        Path(inter).unlink(missing_ok=True)
 
     await set_story_async(
         story_id, status="in_review", stage="Awaiting review",
@@ -436,3 +449,144 @@ async def improve_video(story_id: str, setp, job_id=""):
 async def set_story_async(story_id, **kw):
     kw["updated_at"] = utcnow()
     await db.stories.update_one({"_id": story_id}, {"$set": kw})
+
+
+async def produce_stitch(story_id: str, setp, job_id=""):
+    """Stitch user-uploaded images/video clips into one vertical video (optional per-item narration)."""
+    import shutil
+
+    from job_queue import is_cancelled, JobCancelled
+    from services.ocr import disk_guard
+
+    disk_guard()
+    story = await db.stories.find_one({"_id": story_id})
+    if not story:
+        raise RuntimeError("story not found")
+    channel = await db.channels.find_one({"_id": story["channel_id"]})
+    if not channel:
+        from bson import ObjectId
+        try:
+            channel = await db.channels.find_one({"_id": ObjectId(story["channel_id"])})
+        except Exception:
+            channel = None
+    if not channel:
+        raise RuntimeError(f"channel {story['channel_id']} not found")
+    script = story.get("script") or {}
+    chunks = script.get("chunks") or []
+    if not chunks:
+        raise RuntimeError("no media items to stitch")
+    chunks = chunks[:30]
+    aid = story_id
+
+    async def set_story(**kw):
+        kw["updated_at"] = utcnow()
+        await db.stories.update_one({"_id": story_id}, {"$set": kw})
+
+    await set_story(status="rendering", stage="Stitching your media", error="")
+    clips = []
+    sem = asyncio.Semaphore(2)
+
+    async def one_item(i, ch):
+        nonlocal clips
+        if job_id and is_cancelled(job_id):
+            raise JobCancelled()
+        async with sem:
+            src = Path(ch.get("media_path", ""))
+            if not src.exists():
+                raise RuntimeError(f"uploaded media missing: {src.name}")
+            clip = MEDIA_ROOT / "clips" / aid / f"{i:02d}.mp4"
+            vo = (ch.get("voiceover") or "").strip()
+            aud = None
+            if vo:
+                aud = MEDIA_ROOT / "audio" / aid / f"{i:02d}.mp3"
+                if not aud.exists():
+                    await media.synthesize_voice(
+                        vo, channel.get("voice", ""), channel.get("voice_speed", 1.0), aud,
+                        lang_hint=channel.get("language", "hi"),
+                        direction=ch.get("direction") or (channel.get("tone") or "warm storyteller"),
+                        expressive=channel.get("expressive_voice", True))
+                await _save_cost(story_id, "tts", media.tts_cost(vo))
+            if ch.get("media_kind") == "video":
+                if aud:
+                    adur = media.ffprobe_duration(aud)
+                    await media.compose_ai_clip(src, aud, None, clip,
+                                                ch.get("duration") or max(3.0, adur + 0.6))
+                else:
+                    await media.stitch_video_clip(
+                        src, clip, min(60.0, ch.get("duration") or media.ffprobe_duration(src)))
+            else:
+                dur = ch.get("duration") or 4.0
+                if aud:  # narration always plays in full — extend the slide to fit it
+                    dur = max(dur, media.ffprobe_duration(aud) + 0.6)
+                elif script.get("beat_sync", True):  # silent slides cut on the music's beat
+                    mood = channel.get("music_mood") or "devotional"
+                    beat = 60.0 / media.MOODS.get(mood, media.MOODS["devotional"])["bpm"]
+                    dur = max(beat, round(dur / beat) * beat)
+                cap = None
+                if vo:
+                    cap = MEDIA_ROOT / "tmp" / f"{aid}-s{i:02d}.png"
+                    await asyncio.to_thread(media.render_caption, vo, cap)
+                await media.make_segment_clip(src, aud, cap, clip,
+                                              "zoom_in" if i % 2 == 0 else "zoom_out", dur)
+            clips.append(clip)
+            await setp(10 + int((i + 1) / len(chunks) * 60), f"Item {i + 1}/{len(chunks)}")
+
+    await asyncio.gather(*[one_item(i, c) for i, c in enumerate(chunks)])
+    clips.sort()
+    if job_id and is_cancelled(job_id):
+        raise JobCancelled()
+
+    await setp(70, "Stitching")
+    await set_story(stage="Stitching")
+    main = MEDIA_ROOT / "final" / f"{aid}_main.mp4"
+    await media.concat_clips(clips, main)
+    total = media.ffprobe_duration(main)
+    mixed = main
+    if script.get("music", True):
+        mood = channel.get("music_mood") or "devotional"
+        music = MEDIA_ROOT / "music" / f"{mood}.wav"
+        if not music.exists():
+            await asyncio.to_thread(media.synth_music, mood, music)
+        mixed = MEDIA_ROOT / "final" / f"{aid}_mix.mp4"
+        await media.mix_music(main, music, mixed, total, min(channel.get("music_volume", 0.12), 0.2))
+
+    final = MEDIA_ROOT / "final" / f"{aid}.mp4"
+    if script.get("endcard", True):
+        end_clip = MEDIA_ROOT / "tmp" / f"{aid}-end.mp4"
+        if not end_clip.exists():
+            end_png = MEDIA_ROOT / "tmp" / f"{aid}-end.png"
+            await asyncio.to_thread(media.render_endcard, channel.get("name", "StoryForge"),
+                                    channel.get("cta_text", "Subscribe for more"), end_png)
+            await media.make_endcard_clip(end_png, end_clip)
+        await media.concat_clips([mixed, end_clip], final)
+    elif mixed != final:
+        shutil.copyfile(mixed, final)
+
+    await setp(85, "Thumbnail & metadata")
+    thumb = MEDIA_ROOT / "thumbs" / f"{aid}.jpg"
+    await media.run_ffmpeg("ffmpeg", "-y", "-ss", "0.5", "-i", str(final),
+                           "-frames:v", "1", "-q:v", "3", str(thumb))
+
+    try:
+        meta_, c_ = await agents.make_metadata(story, channel)
+        await _save_cost(story_id, "llm", c_)
+        meta = meta_ if isinstance(meta_, dict) else {}
+    except Exception as e:
+        print(f"[pipeline] stitch metadata unavailable: {str(e)[:120]}", flush=True)
+        meta = {"title": story.get("title_english") or story.get("title_hindi", "My video"),
+                "description": story.get("moral", ""),
+                "hashtags": ["shorts", "story"], "note": "fallback metadata (LLM quota)"}
+
+    await set_story(
+        status="in_review", stage="Awaiting review",
+        qa={"passed": None, "note": "QA agent skipped — stitched-media videos have no AI script"},
+        metadata=meta,
+        media={"final": f"/api/media/final/{aid}.mp4",
+               "duration_sec": round(media.ffprobe_duration(final), 1),
+               "thumbnail": f"/api/media/thumbs/{aid}.jpg"})
+
+    for inter in (main, mixed if mixed != main else None):  # intermediates are rebuildable
+        if inter:
+            Path(inter).unlink(missing_ok=True)
+    for ch in chunks:  # free the uploaded originals once the final render exists
+        Path(ch.get("media_path", "")).unlink(missing_ok=True)

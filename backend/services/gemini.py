@@ -135,11 +135,14 @@ async def gen_image(prompt: str, ref_image_bytes: bytes = None) -> bytes:
     raise RuntimeError(f"gemini image failed: {last}")
 
 
-async def tts(text: str, voice: str, out_wav) -> float:
+async def tts(text: str, voice: str, out_wav, direction: str = None) -> float:
     if circuit_open():
         raise RuntimeError("gemini quota circuit open")
+    spoken = " ".join(str(text).split())[:3500]
+    if direction:
+        spoken = f"{str(direction).strip()}:\n\n{spoken}"
     body = {
-        "contents": [{"parts": [{"text": " ".join(str(text).split())[:3500]}]}],
+        "contents": [{"parts": [{"text": spoken}]}],
         "generationConfig": {
             "responseModalities": ["AUDIO"],
             "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice or "Kore"}}},

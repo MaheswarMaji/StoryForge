@@ -53,7 +53,8 @@ def youtube_auth_url(redirect_uri: str) -> str:
     cid = os.environ["YOUTUBE_CLIENT_ID"].strip()
     return ("https://accounts.google.com/o/oauth2/v2/auth"
             f"?client_id={cid}&redirect_uri={quote(redirect_uri)}&response_type=code"
-            "&scope=https://www.googleapis.com/auth/youtube.force-ssl"
+            "&scope=https://www.googleapis.com/auth/youtube.force-ssl%20"
+            "https://www.googleapis.com/auth/yt-analytics.readonly"
             "&access_type=offline&prompt=consent&include_granted_scopes=true")
 
 
@@ -80,7 +81,7 @@ def _save_env_key(key: str, value: str):
     path.write_text("\n".join(lines) + "\n")
 
 
-def _yt_client():
+def _yt_client(scopes=None):
     from googleapiclient.discovery import build
     from google.oauth2.credentials import Credentials
 
@@ -90,7 +91,7 @@ def _yt_client():
         client_id=os.environ["YOUTUBE_CLIENT_ID"].strip(),
         client_secret=os.environ["YOUTUBE_CLIENT_SECRET"].strip(),
         token_uri="https://oauth2.googleapis.com/token",
-        scopes=["https://www.googleapis.com/auth/youtube.force-ssl"],
+        scopes=scopes or ["https://www.googleapis.com/auth/youtube.force-ssl"],
     )
     return build("youtube", "v3", credentials=creds)
 
@@ -228,3 +229,86 @@ def ig_reply(comment_id: str, text: str) -> str:
                         data={"message": text[:900], "access_token": tok})
         r.raise_for_status()
         return r.json().get("id", "")
+
+
+# ---------- Live YouTube analytics ----------
+YT_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
+
+
+def yt_video_details(video_ids) -> dict:
+    yt = _yt_client()
+    out = {}
+    for i in range(0, len(video_ids), 50):
+        chunk = video_ids[i:i + 50]
+        r = yt.videos().list(part="snippet,statistics", ids=",".join(chunk)).execute()
+        for it in r.get("items", []):
+            s, st = it.get("snippet", {}), it.get("statistics", {})
+            out[it["id"]] = {
+                "video_id": it["id"], "title": s.get("title", ""),
+                "published_at": (s.get("publishedAt", "") or "")[:10],
+                "thumbnail": (s.get("thumbnails", {}).get("medium", {}) or {}).get("url", ""),
+                "views": int(st.get("viewCount", 0) or 0),
+                "likes": int(st.get("likeCount", 0) or 0),
+                "comments": int(st.get("commentCount", 0) or 0)}
+    return out
+
+
+def yt_channel_uploads(limit: int = 30) -> list:
+    """Most recent channel uploads with live statistics, newest first."""
+    yt = _yt_client()
+    ch = yt.channels().list(part="contentDetails", mine=True).execute()
+    items = ch.get("items", [])
+    if not items:
+        return []
+    uploads = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+    ids, token = [], None
+    while len(ids) < limit:
+        r = yt.playlistItems().list(
+            part="contentDetails", playlistId=uploads,
+            maxResults=min(50, limit - len(ids)), pageToken=token).execute()
+        for it in r.get("items", []):
+            vid = it["contentDetails"]["videoId"]
+            if vid not in ids:
+                ids.append(vid)
+        token = r.get("nextPageToken")
+        if not token:
+            break
+    if not ids:
+        return []
+    details = yt_video_details(ids)
+    return [details[v] for v in ids if v in details]
+
+
+def yt_analytics_28d(days: int = 28) -> dict:
+    """Watch-time analytics from the YouTube Analytics API (needs the yt-analytics scope
+    granted during OAuth — reconnect to add it). Raises on 403/missing scope."""
+    from datetime import datetime, timedelta, timezone as _tz
+
+    from googleapiclient.discovery import build
+    from google.oauth2.credentials import Credentials
+
+    creds = Credentials(
+        token=None, refresh_token=os.environ["YOUTUBE_REFRESH_TOKEN"].strip(),
+        client_id=os.environ["YOUTUBE_CLIENT_ID"].strip(),
+        client_secret=os.environ["YOUTUBE_CLIENT_SECRET"].strip(),
+        token_uri="https://oauth2.googleapis.com/token", scopes=[YT_ANALYTICS_SCOPE])
+    yt = build("youtubeAnalytics", "v2", credentials=creds)
+    end = datetime.now(_tz.utc).date()
+    start = end - timedelta(days=days - 1)
+    out = {"scope_ok": True, "days": days}
+    r = yt.reports().query(
+        ids="channel==MINE", startDate=start.isoformat(), endDate=end.isoformat(),
+        metrics="views,estimatedMinutesWatched,averageViewDuration,subscribersGained,subscribersLost").execute()
+    rows = r.get("rows", [])
+    if rows:
+        views, watch_min = sum(row[0] for row in rows), sum(row[1] for row in rows)
+        out.update({
+            "views_28d": views, "watch_minutes_28d": watch_min,
+            "subs_gained_28d": sum(row[3] for row in rows),
+            "subs_lost_28d": sum(row[4] for row in rows),
+            "avg_view_duration_sec": round(watch_min * 60 / views, 1) if views else 0})
+    trend = yt.reports().query(
+        ids="channel==MINE", startDate=start.isoformat(), endDate=end.isoformat(),
+        metrics="views", dimensions="day").execute()
+    out["trend"] = [{"date": row[0], "views": row[1]} for row in trend.get("rows", [])]
+    return out
