@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 5 validates the user's 3-part bug report fixes: (a) image-fallback speed via 35s per-provider caps + _IMAGE_DEAD_UNTIL 10-min circuit in services/imagegen.py, (b) parallel QA+metadata via asyncio.gather and thumbnail reusing frames/00.png (zero AI thumb calls) in pipeline.py, (c) configurable engagement scheduler via GET/PUT /api/settings/scheduler with 0.25-72h clamp and dynamic re-read in server._periodic. All 13 pytest tests PASS (13/13) including a live re-produce of story 6aa616a70b6da578466afad5 that reached in_review within budget (completed inside the 240s test window; QA+metadata parallel; thumbnail mtime updated; no image-API activity — backend log confirms only QA/metadata rate-limit fallbacks, no [media] image-provider chatter, i.e. dead-circuit engaged). Frontend verified end-to-end: /settings shows scheduler-card, engagement-hours-input (value 6), save-scheduler-button works (toast 'Engagement agent will run every 6h', value persists across reload); /stories/6aa616a70b6da578466afad5 shows 'Instant storyboard' mode badge + improvement-coach-card + edit-script-button; /create shows 3 mode radios (mode-slide-radio, mode-clip-radio, mode-storyboard-radio). Regression: /api/stories 200, /api/dashboard 200, /api/admin/overview 401 anon. Scheduler clamp verified: 0.1 → 0.25, 999 → 72, and persisted to db.settings.scheduler.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "N/A — provider quota", "issue": "Backend log continues to show 'litellm.RateLimitError: OpenAIException - You have ...' during QA/metadata; this is external billing state and is now gracefully handled (parallel gather + template fallback). No user-visible impact."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5_bugfix.py",
+    "/app/test_reports/pytest/iteration5.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "services/imagegen.py dead-circuit is in-memory (_IMAGE_DEAD_UNTIL module var) — resets on backend restart, which is fine but worth noting that any restart will pay one full-chain probe (~<=105s worst case = 3 providers x 35s) before re-arming. Consider persisting to db.settings.image_circuit for immediate re-arm on hot deploys.",
+    "pipeline.py QA+metadata parallel is correct; thumbnail reuse of frames/00.png is a clean win. Only edge case: if the hook frame itself came from procedural fallback, thumbnail overlay will be applied to the procedural art — acceptable given no cloud-image quota, but a future 'branded end-card style' fallback thumbnail could look more polished than the mandala frame.",
+    "routes.put_scheduler clamps 0.25-72h correctly; no lower bound of 0.25 enforced at write only — GET returns the stored (already-clamped) value, so consistent.",
+    "Carry-over from iter_4 (still open, low priority): DashboardPage React key-prop warning; queue-paused state not hydrated from db.settings.queue on backend start."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration5_bugfix.py"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% (all 7 spec items verified)"},
+  "test_credentials": "None used; scheduler + produce endpoints are open per current app policy. Admin 401 confirmed for /api/admin/overview.",
+  "seed_data_creation": "None. Re-produced existing story 6aa616a70b6da578466afad5 (cached tiles) — final artifacts refreshed, thumbnail mtime advanced.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 5 covers image dead-circuit, parallel QA/meta, thumb reuse, and configurable engagement scheduler. Test file: /app/backend/tests/test_iteration5_bugfix.py. The produce speed test re-renders story 6aa616a70b6da578466afad5 (safe — tiles cached). Backend restart clears _IMAGE_DEAD_UNTIL — first image call after restart will do one capped probe (<=~105s worst case). Cloud image quotas remain exhausted; PIL/procedural fallback is the designed path until user enables billing.",
+  "rca_of_the_issue": "User bug 1 (no images) = external billing state (Gemini image quota exhausted, OpenAI 0 credits, fal locked, universal key over budget). Code fix caps each provider at 35s and short-circuits ALL cloud providers for 10 min after one full-chain failure, preventing litellm retry-storm (previously up to 240s per call). User bug 2 (review slow) = QA + metadata + thumbnail were sequential and thumbnail triggered the full image chain; fix runs QA & metadata in parallel and reuses frames/00.png as thumbnail art — zero extra image-API calls in the tail. User bug 3 (engagement hardcoded 15 min) = server._periodic now reads db.settings.scheduler.engagement_hours dynamically each cycle (default 6h, clamp 0.25-72h) with GET/PUT /api/settings/scheduler and Settings UI. All three verified live."
+}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { CheckCircle2, Instagram, KeyRound, Loader2, Plug, RefreshCw, ShieldCheck, ShieldAlert, XCircle, Youtube } from "lucide-react";
 import { api, usePoll } from "@/lib/api";
@@ -53,11 +53,31 @@ export default function SettingsPage() {
   const [keys, refreshKeys] = usePoll("/settings/api-keys", 30000);
   const [creds] = usePoll("/social/credentials", 30000);
   const [routerStatus] = usePoll("/router-status", 30000);
+  const [sched, refreshSched] = usePoll("/settings/scheduler", 30000);
   const [values, setValues] = useState({});
   const [token, setToken] = useState("");
   const [uid, setUid] = useState("");
   const [saving, setSaving] = useState(false);
   const [savingKeys, setSavingKeys] = useState(false);
+  const [engagementHours, setEngagementHours] = useState("6");
+  const [savingSched, setSavingSched] = useState(false);
+
+  useEffect(() => {
+    if (sched?.engagement_hours != null) setEngagementHours(String(sched.engagement_hours));
+  }, [sched?.engagement_hours]);
+
+  const saveScheduler = async () => {
+    setSavingSched(true);
+    try {
+      const r = await api.put("/settings/scheduler", { engagement_hours: Number(engagementHours) });
+      toast.success(`Engagement agent will run every ${r.data.engagement_hours}h`);
+      refreshSched();
+    } catch {
+      toast.error("Save failed");
+    } finally {
+      setSavingSched(false);
+    }
+  };
 
   const saveKeys = async () => {
     const filled = Object.fromEntries(Object.entries(values).filter(([, v]) => v && v.trim()));
@@ -200,6 +220,27 @@ export default function SettingsPage() {
               <ShieldCheck className="mr-1.5 h-3.5 w-3.5" /> Manage connection
             </Button>
           </Link>
+        </div>
+      </div>
+
+      <div data-testid="scheduler-card" className="card-glow rounded-2xl border border-amber-500/10 bg-[#12141F] p-6">
+        <div className="mb-4 flex items-center gap-2">
+          <RefreshCw className="h-5 w-5 text-amber-400" />
+          <h3 className="font-display text-lg font-semibold text-amber-300">Automation Schedule</h3>
+        </div>
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="text-xs text-slate-300">
+            Engagement agent runs every
+            <input data-testid="engagement-hours-input" type="number" min="0.25" max="72" step="0.25"
+              value={engagementHours}
+              onChange={(e) => setEngagementHours(e.target.value)}
+              className="mx-2 w-20 rounded-lg border border-white/15 bg-black/40 px-2 py-1 text-center font-mono2 text-xs text-slate-200" />
+            hours
+          </div>
+          <Button data-testid="save-scheduler-button" size="sm" onClick={saveScheduler} disabled={savingSched} className="bg-amber-500 font-semibold text-[#090A0F] hover:bg-amber-400">
+            {savingSched ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />} Save Schedule
+          </Button>
+          <span className="text-[11px] text-slate-500">Default 6h — lower it during launches, raise it to save API quota.</span>
         </div>
       </div>
 

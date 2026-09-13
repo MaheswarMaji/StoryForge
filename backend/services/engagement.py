@@ -61,7 +61,10 @@ async def sync_once(channel_name: str = "StoryForge") -> dict:
     comments_only = [c for c, _, _ in fresh]
     decisions = {}
     try:
-        data = await triage_comments(comments_only[:30], channel_name)
+        from services import llm
+        data = await llm.ask_json(TRIAGE_SYSTEM, "\n".join(
+            [f"{i}. [{c.get('author', 'user')}] {c.get('text', '')[:220]}" for i, c in enumerate(comments_only[:30])]),
+            session="engagement", prefer_local=True)
         decisions = {d.get("index"): d for d in data.get("decisions", []) if isinstance(d, dict)}
     except Exception as e:
         print(f"[engagement] triage failed: {str(e)[:150]}")

@@ -20,7 +20,8 @@ async def _save_cost(story_id: str, kind: str, amount: float):
          "$set": {"updated_at": utcnow()}},
     )
 
-async def produce_video(story_id: str, setp):
+async def produce_video(story_id: str, setp, job_id=""):
+    from job_queue import is_cancelled, JobCancelled
     from services.ocr import disk_guard
     disk_guard()
     story = await db.stories.find_one({"_id": story_id})
@@ -104,7 +105,9 @@ async def produce_video(story_id: str, setp):
         f"{c.get('name')}: {c.get('description')}" for c in story.get("characters", []))
     style = channel.get("style_prefix") or story.get("visual_style") or "Indian miniature painting style"
     char_path = MEDIA_ROOT / "char" / f"{aid}.png"
-    if not char_path.exists():
+    if mode == "storyboard":
+        pass  # one-shot poster replaces the per-segment images and the character sheet
+    elif not char_path.exists():
         ai_ok = await media.generate_image(
             f"Character reference sheet, single illustration on plain dark backdrop, vertical 9:16. "
             f"Art style: {style}. Characters: {anchor}. Clean detailed lineup, no text, no watermark.",
@@ -116,8 +119,21 @@ async def produce_video(story_id: str, setp):
     sem = asyncio.Semaphore(2)
     from services import router
 
+    slides = None
+    if mode == "storyboard":
+        if job_id and is_cancelled(job_id):
+            raise JobCancelled()
+        from services import storyboard
+        await set_story(stage="Storyboard poster")
+        await setp(8, "One-shot storyboard: all slides in a single image")
+        slides = await storyboard.generate_storyboard(
+            chunks, MEDIA_ROOT / "frames" / aid, style, channel)
+        await setp(30, f"Poster sliced into {len(slides)} slides")
+
     async def one_segment(i, chunk):
         nonlocal audio_urls, frame_urls
+        if job_id and is_cancelled(job_id):
+            raise JobCancelled()
         async with sem:
             audio_dir = MEDIA_ROOT / "audio" / aid
             aud = audio_dir / f"{i:02d}.mp3"
@@ -178,6 +194,9 @@ async def produce_video(story_id: str, setp):
 
     await asyncio.gather(*[one_segment(i, c) for i, c in enumerate(chunks)])
 
+    if job_id and is_cancelled(job_id):
+        raise JobCancelled()
+
     setp(62, "Stitching")
     await set_story(stage="Stitching")
     clips = sorted((MEDIA_ROOT / "clips" / aid).glob("*.mp4"))
@@ -205,38 +224,48 @@ async def produce_video(story_id: str, setp):
     final = MEDIA_ROOT / "final" / f"{aid}.mp4"
     await media.concat_clips([mixed, end_clip], final)
 
-    setp(72, "QA review")
-    await set_story(stage="QA")
-    try:
-        qa, qa_cost = await agents.run_qa(story, channel)
-        await _save_cost(story_id, "llm", qa_cost)
-    except Exception as e:
-        print(f"[pipeline] QA unavailable: {str(e)[:120]}", flush=True)
-        qa = {"passed": None, "score": None, "checks": [], "issues": [],
-              "note": "QA agent temporarily unavailable (API quota) — rerun after quota resets"}
+    setp(72, "QA & metadata")
+    await set_story(stage="QA & metadata")
 
-    setp(86, "Metadata & thumbnail")
-    await set_story(stage="Metadata")
-    try:
-        meta, meta_cost = await agents.make_metadata(story, channel)
-        await _save_cost(story_id, "llm", meta_cost)
-    except Exception as e:
-        print(f"[pipeline] metadata unavailable: {str(e)[:120]}", flush=True)
-        meta = {"title": story.get("title_english") or story.get("title_hindi", ""),
-                "description": story.get("moral", ""),
-                "hashtags": ["stories", "india", "mythology", "shorts"],
-                "thumbnail_text": story.get("title_english", "")[:40],
-                "note": "auto-metadata unavailable (API quota) — rerun later"}
+    async def _qa():
+        try:
+            qa_, c_ = await agents.run_qa(story, channel)
+            await _save_cost(story_id, "llm", c_)
+            return qa_
+        except Exception as e:
+            print(f"[pipeline] QA unavailable: {str(e)[:120]}", flush=True)
+            return {"passed": None, "score": None, "checks": [], "issues": [],
+                    "note": "QA agent temporarily unavailable (API quota) — rerun after quota resets"}
 
-    thumb_art = MEDIA_ROOT / "tmp" / f"{aid}-thumb-raw.png"
+    async def _meta():
+        try:
+            m_, c_ = await agents.make_metadata(story, channel)
+            await _save_cost(story_id, "llm", c_)
+            return m_
+        except Exception as e:
+            print(f"[pipeline] metadata unavailable: {str(e)[:120]}", flush=True)
+            return {"title": story.get("title_english") or story.get("title_hindi", ""),
+                    "description": story.get("moral", ""),
+                    "hashtags": ["stories", "india", "mythology", "shorts"],
+                    "thumbnail_text": story.get("title_english", "")[:40],
+                    "note": "auto-metadata unavailable (API quota) — rerun later"}
+
+    qa, meta = await asyncio.gather(_qa(), _meta())
+
+    setp(86, "Thumbnail")
+    await set_story(stage="Thumbnail")
     main_char = (story.get("characters") or [{}])[0]
-    ai_ok = await media.generate_image(
-        f"Dramatic viral YouTube Shorts thumbnail artwork, vertical 9:16, extreme emotional close-up, "
-        f"high contrast rim lighting, {style}. Main character: {main_char.get('description', anchor[:300])}. "
-        f"Scene: {story.get('climax', '')}. No text, no watermark.",
-        thumb_art, ref_image=char_path, session=f"thumb-{aid}")
-    if ai_ok:
-        await _save_cost(story_id, "image", media.IMAGE_PRICE)
+    # reuse the hook slide as thumbnail art — zero extra image-API calls (this was the slow tail)
+    thumb_art = MEDIA_ROOT / "frames" / aid / "00.png"
+    if not thumb_art.exists():
+        thumb_art = MEDIA_ROOT / "tmp" / f"{aid}-thumb-raw.png"
+        ai_ok = await media.generate_image(
+            f"Dramatic viral YouTube Shorts thumbnail artwork, vertical 9:16, extreme emotional close-up, "
+            f"high contrast rim lighting, {style}. Main character: {main_char.get('description', anchor[:300])}. "
+            f"Scene: {story.get('climax', '')}. No text, no watermark.",
+            thumb_art, ref_image=char_path, session=f"thumb-{aid}")
+        if ai_ok:
+            await _save_cost(story_id, "image", media.IMAGE_PRICE)
     thumb_path = MEDIA_ROOT / "thumbs" / f"{aid}.jpg"
     await asyncio.to_thread(
         media.overlay_title_on_image, thumb_art,
@@ -324,7 +353,7 @@ async def regenerate_segment(story_id: str, index: int, setp):
                "frames": [f"/api/media/frames/{aid}/{i:02d}.png" for i in range(len(chunks))]})
 
 
-async def improve_video(story_id: str, setp):
+async def improve_video(story_id: str, setp, job_id=""):
     """Improvement coach: after assessment, pinpoint the weakest scope, apply targeted edits
     (max 2 rounds) and keep them ONLY if the overall viral score improves — auto-revert otherwise."""
     import json as _json
@@ -382,7 +411,7 @@ async def improve_video(story_id: str, setp):
         "stage": f"Improvement round {len(attempts) + 1}: re-render"}})
 
     await setp(15, "Re-rendering with targeted edits")
-    await produce_video(story_id, setp)
+    await produce_video(story_id, setp, job_id=job_id)
 
     fresh = await db.stories.find_one({"_id": story_id})
     new_score = ((fresh.get("script") or {}).get("viral_score") or {}).get("total")
@@ -395,7 +424,7 @@ async def improve_video(story_id: str, setp):
     if not accepted:
         await set_story_async(story_id, script=prev_script, stage="Reverting — no score gain")
         await setp(55, "Reverting to previous script")
-        await produce_video(story_id, setp)
+        await produce_video(story_id, setp, job_id=job_id)
 
     await db.stories.update_one(
         {"_id": story_id},

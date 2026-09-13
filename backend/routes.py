@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from auth import optional_user_id
 from db import db
-from job_queue import HEARTBEAT, enqueue
+from job_queue import HEARTBEAT, QUEUE_PAUSED, enqueue
 from models import Book, Story, Channel, utcnow
 from services.ocr import MEDIA_ROOT
 
@@ -155,6 +155,81 @@ async def produce(story_id: str):
     return {"job_id": job_id}
 
 
+@router.post("/stories/{story_id}/stop")
+async def stop_story(story_id: str):
+    """Cancel the running/queued produce (or improve) job for this story."""
+    j = await db.jobs.find_one(
+        {"ref_id": story_id, "type": {"$in": ["produce", "improve", "segment_fix"]},
+         "status": {"$in": ["queued", "running"]}},
+        sort=[("created_at", -1)])
+    if not j:
+        raise HTTPException(409, "no active render job for this story")
+    from job_queue import cancel_job
+    await db.jobs.update_one({"_id": j["_id"]}, {"$set": {
+        "status": "cancelled", "error": "stopped by user", "finished_at": utcnow()}})
+    cancel_job(j["_id"])
+    await db.stories.update_one(
+        {"_id": story_id, "status": "rendering"},
+        {"$set": {"status": "script_ready", "stage": "Stopped by user", "error": ""}})
+    return {"ok": True, "job_id": j["_id"]}
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job_endpoint(job_id: str):
+    from job_queue import cancel_job
+    j = await db.jobs.find_one({"_id": job_id})
+    if not j:
+        raise HTTPException(404, "job not found")
+    await db.jobs.update_one({"_id": job_id, "status": {"$in": ["queued", "running"]}},
+                             {"$set": {"status": "cancelled", "error": "stopped by user",
+                                       "finished_at": utcnow()}})
+    cancel_job(job_id)
+    if j.get("ref_id") and j["ref_id"] != "system":
+        await db.stories.update_one(
+            {"_id": j["ref_id"], "status": "rendering"},
+            {"$set": {"status": "script_ready", "stage": "Stopped by user", "error": ""}})
+    return {"ok": True}
+
+
+class PauseBody(BaseModel):
+    paused: bool
+
+
+@router.post("/queue/pause")
+async def queue_pause(body: PauseBody):
+    from job_queue import QUEUE_PAUSED
+    QUEUE_PAUSED["paused"] = bool(body.paused)
+    await db.settings.update_one({"key": "queue"},
+                                 {"$set": {"paused": bool(body.paused)}}, upsert=True)
+    return {"paused": QUEUE_PAUSED["paused"]}
+
+
+@router.get("/settings/scheduler")
+async def get_scheduler():
+    doc = await db.settings.find_one({"key": "scheduler"}) or {}
+    return {"engagement_hours": float(doc.get("engagement_hours", 6.0)),
+            "news_hours": float(doc.get("news_hours", 6.0)),
+            "queue_paused": QUEUE_PAUSED["paused"]}
+
+
+class SchedulerBody(BaseModel):
+    engagement_hours: Optional[float] = None
+    news_hours: Optional[float] = None
+
+
+@router.put("/settings/scheduler")
+async def put_scheduler(body: SchedulerBody):
+    patch = {}
+    if body.engagement_hours is not None:
+        patch["engagement_hours"] = max(0.25, min(72.0, float(body.engagement_hours)))
+    if body.news_hours is not None:
+        patch["news_hours"] = max(0.5, min(72.0, float(body.news_hours)))
+    if patch:
+        await db.settings.update_one({"key": "scheduler"},
+                                     {"$set": {**patch, "updated_at": utcnow()}}, upsert=True)
+    return await get_scheduler()
+
+
 @router.post("/stories/{story_id}/segments/{index}/regenerate")
 async def regen_segment(story_id: str, index: int):
     s = await db.stories.find_one({"_id": story_id})
@@ -200,7 +275,7 @@ async def create_story(body: CreateBody):
     if not body.source_text.strip():
         raise HTTPException(400, "paste a script or prompt first")
     target = max(30, min(240, int(body.length_seconds or 90)))
-    mode = body.mode if body.mode in ("slide", "clip") else "slide"
+    mode = body.mode if body.mode in ("slide", "clip", "storyboard") else "slide"
     key = f"vt-{body.video_type}"
     ch = await db.channels.find_one({"key": key})
     if not ch:
@@ -282,7 +357,7 @@ async def story_config(story_id: str, body: ConfigBody):
     if s["status"] == "rendering":
         raise HTTPException(409, "pipeline busy")
     patch = {}
-    if body.mode in ("slide", "clip") and body.mode != s.get("mode"):
+    if body.mode in ("slide", "clip", "storyboard") and body.mode != s.get("mode"):
         # mode switch invalidates AI clips (slide mode ignores them, clip mode needs fresh ones)
         clips_dir = MEDIA_ROOT / "clips" / story_id
         if clips_dir.exists():
@@ -378,6 +453,7 @@ async def dashboard():
         "queue": {"depth": await db.jobs.count_documents({"status": "queued"}),
                   "active": HEARTBEAT["active"],
                   "workers": HEARTBEAT["workers"],
+                  "paused": QUEUE_PAUSED["paused"],
                   "last_beat": HEARTBEAT["last_beat"].isoformat() if HEARTBEAT["last_beat"] else None,
                   "job_counts": job_counts},
         "jobs": jobs,

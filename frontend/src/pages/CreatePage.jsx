@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clapperboard, Film, Images, Loader2, Wand2 } from "lucide-react";
+import { Clapperboard, Film, Images, LayoutGrid, Loader2, Wand2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ export default function CreatePage() {
   const [title, setTitle] = useState("");
   const [source, setSource] = useState("");
   const [vtype, setVtype] = useState("mythology_moral");
-  const [mode, setMode] = useState("slide");
+  const [mode, setMode] = useState("storyboard");
   const [length, setLength] = useState(90);
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
@@ -83,7 +83,7 @@ export default function CreatePage() {
         <div className="grid gap-5 sm:grid-cols-2">
           <div>
             <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">Production style</label>
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-3 gap-2.5">
               <button data-testid="mode-slide-radio" onClick={() => setMode("slide")}
                 className={`flex flex-col items-center gap-1.5 rounded-xl border p-4 transition-colors ${mode === "slide" ? "border-cyan-500/60 bg-cyan-500/10 text-cyan-200" : "border-white/10 bg-black/30 text-slate-400"}`}>
                 <Images className="h-5 w-5" />
@@ -95,6 +95,12 @@ export default function CreatePage() {
                 <Film className="h-5 w-5" />
                 <span className="text-xs font-semibold">AI video clips</span>
                 <span className="text-[10px] leading-snug text-slate-500">Short AI video clips per scene, stitched</span>
+              </button>
+              <button data-testid="mode-storyboard-radio" onClick={() => setMode("storyboard")}
+                className={`flex flex-col items-center gap-1.5 rounded-xl border p-4 transition-colors ${mode === "storyboard" ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-200" : "border-white/10 bg-black/30 text-slate-400"}`}>
+                <LayoutGrid className="h-5 w-5" />
+                <span className="text-xs font-semibold">Instant storyboard</span>
+                <span className="text-[10px] leading-snug text-slate-500">All slides in ONE image, sliced locally — fastest &amp; cheapest</span>
               </button>
             </div>
           </div>

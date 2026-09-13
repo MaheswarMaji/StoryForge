@@ -47,9 +47,37 @@ def parse_json(text: str):
     return obj
 
 
-async def ask_json(system: str, prompt: str, session: str = "job", retries: int = 2):
+def ollama_url():
+    return (os.environ.get("OLLAMA_BASE_URL") or "").strip()
+
+
+async def _ollama_json(system: str, prompt: str):
+    """Local Qwen (Ollama) for small processing — activated by setting OLLAMA_BASE_URL."""
+    import httpx
+
+    base = ollama_url().rstrip("/")
+    model = os.environ.get("OLLAMA_MODEL", "qwen2.5:32b")
+    async with httpx.AsyncClient(timeout=600) as client:
+        r = await client.post(f"{base}/api/chat", json={
+            "model": model, "stream": False, "format": "json",
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": prompt}]})
+        r.raise_for_status()
+        return parse_json(r.json()["message"]["content"])
+
+
+async def ask_json(system: str, prompt: str, session: str = "job", retries: int = 2,
+                   prefer_local: bool = False):
     from services import gemini  # lazy: avoids circular import
     last_err = None
+
+    # 0) local Qwen (Ollama) first for small processing tasks when configured
+    if prefer_local and ollama_url():
+        try:
+            return await _ollama_json(system, prompt)
+        except Exception as e:
+            last_err = e
+            print(f"[llm] ollama chain failed: {str(e)[:120]}", flush=True)
 
     # 1) user's Gemini key first (cheapest)
     if gemini.gemini_key():

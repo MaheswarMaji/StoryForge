@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 
 from db import db
@@ -10,6 +11,20 @@ HEARTBEAT = {"last_beat": None, "active": 0, "workers": 0}
 HANDLERS = {}
 PRIORITY = {"produce": 0, "publish": 0, "improve": 0, "script": 1, "segment_fix": 1,
             "ocr": 2, "segment": 2, "news": 3, "engagement": 3}
+CANCELLED = set()          # job ids cancelled while running (same-process workers)
+QUEUE_PAUSED = {"paused": False}
+
+
+class JobCancelled(Exception):
+    pass
+
+
+def cancel_job(job_id):
+    CANCELLED.add(str(job_id))
+
+
+def is_cancelled(job_id):
+    return str(job_id) in CANCELLED
 
 
 def now():
@@ -54,6 +69,10 @@ async def _claim_next(idx: int):
 
 async def _worker(idx: int):
     while True:
+        if QUEUE_PAUSED["paused"]:
+            HEARTBEAT["active"] = 0
+            await asyncio.sleep(2)
+            continue
         job = await _claim_next(idx)
         if not job:
             HEARTBEAT["active"] = 0
@@ -72,6 +91,13 @@ async def _worker(idx: int):
 
             await handler(job, setp)
             await _update(job_id, status="done", progress=100, stage="complete", finished_at=now())
+        except JobCancelled:
+            print(f"[queue] job {job_id} cancelled by user", flush=True)
+            await _update(job_id, status="cancelled", stage="stopped by user", finished_at=now())
+            if job.get("ref_id") and job["ref_id"] != "system":
+                await db.stories.update_one(
+                    {"_id": job["ref_id"], "status": "rendering"},
+                    {"$set": {"status": "script_ready", "stage": "Stopped by user", "error": ""}})
         except Exception as e:
             log.exception("job %s failed", job_id)
             await _update(job_id, status="failed", error=str(e)[:900], finished_at=now())

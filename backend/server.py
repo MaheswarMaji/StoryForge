@@ -96,6 +96,10 @@ async def startup():
 
 
 async def _load_key_vault():
+    doc = await db.settings.find_one({"key": "queue"})
+    if doc and doc.get("paused"):
+        job_queue.QUEUE_PAUSED["paused"] = True
+        print("[startup] queue was paused before restart — staying paused", flush=True)
     doc = await db.settings.find_one({"key": "api_keys"})
     n = 0
     for k, v in (doc or {}).get("values", {}).items():
@@ -134,8 +138,21 @@ async def _load_social_settings():
 async def _delayed_workers():
     await job_queue.start_workers(2)
     log.info("job queue workers started")
-    asyncio.create_task(_periodic("engagement", 900, _engagement_ready))
-    asyncio.create_task(_periodic("news", 6 * 3600, lambda: True))
+    # engagement defaults to every 6 hours — adjustable live in Settings (db.settings.scheduler)
+    asyncio.create_task(_periodic("engagement", 6.0, _engagement_ready))
+    asyncio.create_task(_periodic("news", 6 * 3600 / 3600, lambda: True))
+
+
+async def _scheduler_interval(job_type: str, default: float) -> float:
+    doc = await db.settings.find_one({"key": "scheduler"})
+    if job_type == "engagement":
+        hours = (doc or {}).get("engagement_hours", default)
+        try:
+            hours = float(hours)
+        except (TypeError, ValueError):
+            hours = default
+        return max(0.25, min(72.0, hours)) * 3600
+    return default * 3600
 
 
 async def _engagement_ready():
@@ -143,16 +160,18 @@ async def _engagement_ready():
     return any(social.cred_status().values())
 
 
-async def _periodic(job_type: str, interval: int, ready):
+async def _periodic(job_type: str, default_hours: float, ready):
     from job_queue import enqueue
     await asyncio.sleep(30)
     while True:
         try:
+            interval = await _scheduler_interval(job_type, default_hours)
             if await ready() if asyncio.iscoroutinefunction(ready) else ready():
                 await enqueue(job_type, "system", f"Scheduled {job_type}")
+            await asyncio.sleep(interval)
         except Exception as e:
             log.warning("periodic %s failed: %s", job_type, e)
-        await asyncio.sleep(interval)
+            await asyncio.sleep(300)
 
 
 @app.on_event("shutdown")

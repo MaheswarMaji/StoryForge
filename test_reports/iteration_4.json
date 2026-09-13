@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 4 validates the user's 'too slow / need stop button' fixes: storyboard mode, stop/cancel/pause endpoints, mode routing, local-Qwen fallback, PIL storyboard poster. Backend pytest 13/14 pass (1 failure was cross-worker pause-state race — passes when run alone). Stop button + queue pause + job-cancel endpoints all work; per-story stop kicked in on a live 12-min produce job and cleanly returned the story to script_ready 'Stopped by user' with the produce job marked cancelled. Storyboard PIL fallback module verified. Existing storyboard demo 6aa616a70b6da578466afad5 has valid grid poster + 6 differing tiles + final video (intact). Slide-mode demo 6aa57c1eaad23f394fffaa41.mp4 intact (not re-rendered). Engagement sync completes with Ollama absent (fallback works). New Gemini + OpenAI keys are set in vault. FE: /create shows all three mode-radios with Instant storyboard visually default-selected; dashboard has queue-pause-button + paused badge + per-job Stop buttons (job-cancel-{id}); story detail during rendering shows stop-render-button. CRITICAL FINDING: the storyboard-mode E2E timing goal is NOT met on this environment. A fresh 45s / 4-segment storyboard story ran for 740s (>12 min) and was still stuck in the 'Metadata' LLM stage when I stopped it: Script ~90s → Fact check ~40s → Storyboard poster ~290s (Gemini image API retries + fallback loops) → QA ~40s → Metadata >200s (LLM provider chain retries; OpenAI chat returns 'no credits remaining' and gemini image retries burn wall time). The user's original 'render takes 12+ min' complaint reproduces under the current provider outage state.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/stories/{id}/produce (storyboard mode)", "issue": "45s / 4-seg storyboard render did not reach in_review within the 5-min success budget — sat at >12min still on 'Metadata' stage. Root cause: image-provider retry loops in services/media.generate_image (gemini image) + LLM provider chain in metadata/qa are eating minutes per call because OpenAI returns 'no credits remaining' 100% and gemini image keeps retrying with exponential backoff via litellm. The storyboard slicing itself is fast — the surrounding LLM/image cascade is the bottleneck. Consider (a) tightening litellm num_retries / max_retries on image + chat calls, (b) short-circuiting a provider for the remainder of a produce_video run after N consecutive failures, (c) allowing metadata to fall back to a canned template like the PIL poster does, (d) making the storyboard AI-poster attempt subject to a hard wall-clock timeout (e.g. 20s) before dropping to PIL.", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "test_paused_queue_does_not_claim_jobs", "issue": "Passes serially; fails under -n 2 loadscope because another class (TestCancelJob) mutates the same shared QUEUE_PAUSED flag → cross-worker interference. Not a product bug."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "StoryDetailPage", "issue": "Mode badge line 84 only handles clip vs slide → storyboard stories are mislabeled 'Slide-based'. Should render 'Instant storyboard' when story.mode === 'storyboard'.", "selector": "StoryDetailPage.jsx:84 Badge (story.mode === 'clip' ? 'AI video clips' : 'Slide-based')", "priority": "MEDIUM"},
+      {"component": "DashboardPage", "issue": "Carry-over from iter_1/2/3 — 'Each child in a list should have a unique key prop' console warning still present.", "selector": "DashboardPage list render", "priority": "LOW"},
+      {"component": "DashboardPage", "issue": "Small red 'Failed' toast appeared during my rapid Pause→Resume toggle test; likely from another concurrent action, but toast copy is generic and non-actionable.", "selector": "toast", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4_stop_pause_storyboard.py",
+    "/app/test_reports/pytest/iteration4.xml"
+  ],
+  "action_items": [
+    "Fix StoryDetailPage.jsx:84 mode badge — add storyboard label (e.g. story.mode === 'storyboard' ? 'Instant storyboard' : story.mode === 'clip' ? 'AI video clips' : 'Slide-based').",
+    "CRITICAL: cap per-call wall time on services/media.generate_image and services/llm.ask_json (or lower litellm num_retries) so a single flaky provider cannot burn 3-5 minutes. Applies to storyboard-poster, QA, Metadata, and improvement-coach paths — current retry cascade is the reason a 4-seg storyboard render was still not done at 12 min in this iteration.",
+    "Consider a canned/PIL fallback for metadata generation (title/description/hashtags) analogous to the PIL storyboard poster fallback, so complete provider outage doesn't block the pipeline from reaching in_review.",
+    "Optional: keep the paused-queue test isolated via serial marker or module-scope xfail under -n 2 (test-side only)."
+  ],
+  "critical_code_review_comments": [
+    "services/storyboard.py is clean & self-contained (~130 lines). Poster tile slicing is correct; PIL fallback works with no APIs.",
+    "job_queue.CANCELLED set + JobCancelled exception is a solid cooperative-cancel design; stop endpoint updates BOTH job status and story status atomically enough (two updates but cheap).",
+    "POST /queue/pause persists to db.settings.queue.paused — good for surviving worker restarts, but recover() at start_workers does not read it back into QUEUE_PAUSED['paused']. If backend is restarted while paused, the queue silently unpauses. Suggest reading db.settings.queue on start_workers and hydrating QUEUE_PAUSED.",
+    "services/llm.py prefer_local ollama fallback is correctly non-fatal (fails fast when OLLAMA_BASE_URL unset), but the fall-through to the cloud chain still uses the full retry ladder — this is what makes the storyboard render slow. prefer_local currently does not shorten cloud retries.",
+    "routes.py stop_story does NOT verify permission/session — anon can stop any story's job. Same for /queue/pause. Given auth is optional app-wide right now that matches existing pattern, but worth calling out for the eventual multi-tenant model."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration4_stop_pause_storyboard.py"
+  ],
+  "success_rate": {
+    "backend": "93% (13/14 pytest, 1 was test-side parallelism race)",
+    "frontend": "90% (all testids resolve, stop/pause/cancel wired, storyboard mode card present + default; 1 mode-badge label bug)"
+  },
+  "test_credentials": "None used — all iteration-4 endpoints (stop/cancel/pause/produce/create) are open per current app policy.",
+  "seed_data_creation": "Created and cleaned up TEST_storyboard_validate, TEST_paused_enq, TEST_cancelme, TEST_stopme stories. Left one story behind: 6aa622fec2babed4d6ed2950 (TEST_sb_e2e, status=script_ready, stopped by user) as evidence of the timing bug — main agent can delete or use it to reproduce.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "Iteration 4 test file at /app/backend/tests/test_iteration4_stop_pause_storyboard.py covers: mode=storyboard create+config, queue pause/resume + non-claim while paused, cancel_job endpoint (queued job), stop_story endpoint (409 when idle, 200+cancel when active), storyboard artifacts on finished story 6aa616a70b6da578466afad5, GEMINI/OPENAI keys set, engagement sync fallback, direct PIL poster module test. TestQueuePause needs serial run under -n 2 (or leave the one failure — it's not a product bug). The storyboard 5-min timing budget is NOT met on this env because of provider retry cascades — see backend.err.log for gemini-image + OpenAI 'no credits remaining' retries. Story 6aa622fec2babed4d6ed2950 was mid-'Metadata' when stopped at 740s.",
+  "rca_of_the_issue": "User's complaint: 'voice generation taking too long, need stop button'. Voice generation itself is fine (Kokoro CPU ~10-25s/seg). The real time-sink in a storyboard render on this env is the retry cascade in LLM + image provider chain: (1) Gemini image API returns errors, litellm retries with backoff (multiple rounds visible in backend.err.log), then falls through to next provider that also errors, before the PIL fallback is finally reached — this consumed ~5 min in the poster stage of the fresh story. (2) Metadata LLM stage hit OpenAI which returns 'RateLimitError: no credits remaining' — again through full retry ladder, another 3+ min. Stop button works and unblocks user immediately, which IS the primary UX fix requested — but the underlying rendering budget is still bad. Recommended: hard per-call timeouts + provider circuit-breakers per produce_video run."
+}

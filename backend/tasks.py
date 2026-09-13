@@ -90,7 +90,7 @@ async def run_script_job(job, setp):
 
 async def run_produce_job(job, setp):
     from pipeline import produce_video
-    await produce_video(job["ref_id"], setp)
+    await produce_video(job["ref_id"], setp, job_id=job["_id"])
 
 
 async def run_segment_fix_job(job, setp):
@@ -101,7 +101,7 @@ async def run_segment_fix_job(job, setp):
 
 async def run_improve_job(job, setp):
     from pipeline import improve_video
-    await improve_video(job["ref_id"], setp)
+    await improve_video(job["ref_id"], setp, job_id=job["_id"])
 
 
 async def run_publish_job(job, setp):

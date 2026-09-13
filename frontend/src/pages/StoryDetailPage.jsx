@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { Play, RefreshCw, Download, CheckCircle2, XCircle, AlertTriangle, Loader2, Wand2, Sparkles, TrendingUp, Clapperboard } from "lucide-react";
+import { Play, RefreshCw, Download, CheckCircle2, XCircle, AlertTriangle, Loader2, Wand2, Sparkles, TrendingUp, Clapperboard, Square } from "lucide-react";
 import { api, usePoll, useChannels, MEDIA } from "@/lib/api";
 import { BEATS, beatMeta, PIPELINE_STEPS, statusMeta } from "@/lib/ui";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +42,8 @@ export default function StoryDetailPage() {
     setDrafts({});
     toast.success("Script updated — edited segments will re-render on next produce");
   });
+  const stopRender = () => act(() => api.post(`/stories/${id}/stop`).then(() => toast.success("Render stopped — completed segments are kept")));
+
   const saveConfig = (patch) => act(async () => {
     await api.put(`/stories/${id}/config`, patch);
     if (patch.target_seconds != null) {
@@ -79,7 +81,9 @@ export default function StoryDetailPage() {
               </Badge>
             )}
             {story.mode && (
-              <Badge variant="outline" className="border-cyan-500/40 text-[11px] text-cyan-300">{story.mode === "clip" ? "AI video clips" : "Slide-based"}</Badge>
+              <Badge variant="outline" className="border-cyan-500/40 text-[11px] text-cyan-300">
+                {story.mode === "clip" ? "AI video clips" : story.mode === "storyboard" ? "Instant storyboard" : "Slide-based"}
+              </Badge>
             )}
             {!!story.target_seconds && <Badge variant="outline" className="border-white/15 font-mono2 text-slate-400">~{story.target_seconds}s</Badge>}
             {story.script?.editor?.factual_ok === false && (
@@ -122,6 +126,12 @@ export default function StoryDetailPage() {
           </div>
         ))}
         {story.stage && <span className="ml-auto font-mono2 text-[11px] text-slate-500">{story.stage}</span>}
+        {story.status === "rendering" && (
+          <button data-testid="stop-render-button" onClick={stopRender}
+            className="ml-3 flex shrink-0 items-center gap-1.5 rounded-full border border-rose-500/40 bg-rose-500/10 px-3 py-1 text-[11px] font-semibold text-rose-300 transition-colors hover:bg-rose-500/20">
+            <Square className="h-3 w-3" /> Stop
+          </button>
+        )}
       </div>
 
       {(story.script?.editor?.notes?.length || story.script?.editor?.factual_ok != null) && (
@@ -164,6 +174,7 @@ export default function StoryDetailPage() {
             <select data-testid="mode-select" value={story.mode || "slide"} onChange={(e) => saveConfig({ mode: e.target.value })}
               className="rounded-lg border border-white/15 bg-black/40 px-2 py-1.5 text-xs text-slate-200">
               <option value="slide">Slide-based — image slides + infographics</option>
+              <option value="storyboard">Instant storyboard — one AI image, sliced</option>
               <option value="clip">AI video clips per scene</option>
             </select>
           </div>

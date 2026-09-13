@@ -1,8 +1,9 @@
 import { BookOpen, Clock, DollarSign, Film, Layers, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
-import { usePoll, useChannels, MEDIA } from "@/lib/api";
+import { usePoll, useChannels, MEDIA, api } from "@/lib/api";
 import { STATUS, statusMeta, jobDuration } from "@/lib/ui";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 import {
   Bar as RBar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
   Tooltip, XAxis, YAxis,
@@ -22,7 +23,7 @@ const StatCard = ({ icon: Icon, label, value, sub, testid, accent = "text-amber-
 );
 
 export default function DashboardPage() {
-  const [dash] = usePoll("/dashboard", 4000);
+  const [dash, refresh] = usePoll("/dashboard", 4000);
   const { channels } = useChannels();
   if (!dash) return <div className="p-10 text-slate-500">Loading factory floor…</div>;
 
@@ -115,7 +116,23 @@ export default function DashboardPage() {
               <h3 className="font-display text-lg font-semibold text-amber-300">Job Queue</h3>
               <p className="text-xs text-slate-500">Most recent async jobs — OCR, story mining, scripts, rendering</p>
             </div>
-            <Clock className="h-4 w-4 text-slate-500" />
+            <div className="flex items-center gap-2">
+              {dash.queue?.paused && <Badge className="border border-orange-600/50 bg-orange-950/50 text-[10px] text-orange-300">paused</Badge>}
+              <button
+                data-testid="queue-pause-button"
+                onClick={async () => {
+                  try {
+                    await api.post("/queue/pause", { paused: !(dash.queue?.paused) });
+                    toast.success(dash.queue?.paused ? "Queue resumed" : "Queue paused — running jobs continue, no new jobs start");
+                    refresh();
+                  } catch { toast.error("Failed"); }
+                }}
+                className={`rounded-full border px-3 py-1 text-[10px] font-semibold ${dash.queue?.paused ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : "border-orange-500/40 bg-orange-500/10 text-orange-300"}`}
+              >
+                {dash.queue?.paused ? "Resume Queue" : "Pause Queue"}
+              </button>
+              <Clock className="h-4 w-4 text-slate-500" />
+            </div>
           </div>
           <div className="max-h-72 overflow-y-auto px-6 pb-6">
             <table className="w-full text-left text-xs">
@@ -133,9 +150,22 @@ export default function DashboardPage() {
                     </td>
                     <td className="max-w-40 truncate py-2 pr-3 text-slate-400">{j.error ? j.error.slice(0, 60) : j.stage || "—"}</td>
                     <td className="py-2 font-mono2 text-slate-500">{jobDuration(j) !== null ? `${jobDuration(j)}s` : "—"}</td>
+                    <td className="py-2 pr-1 text-right">
+                      {["queued", "running"].includes(j.status) && (
+                        <button
+                          data-testid={`job-cancel-${j.id}`}
+                          title="Stop this job"
+                          onClick={async () => {
+                            try { await api.post(`/jobs/${j.id}/cancel`); toast.success("Job stopped"); refresh(); }
+                            catch { toast.error("Stop failed"); }
+                          }}
+                          className="rounded-md border border-rose-500/30 px-2 py-0.5 text-[10px] font-semibold text-rose-300 hover:bg-rose-500/10"
+                        >Stop</button>
+                      )}
+                    </td>
                   </tr>
                 ))}
-                {!(dash.jobs || []).length && <tr><td colSpan={4} className="py-6 text-center text-slate-500">No jobs yet</td></tr>}
+                {!(dash.jobs || []).length && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No jobs yet</td></tr>}
               </tbody>
             </table>
           </div>

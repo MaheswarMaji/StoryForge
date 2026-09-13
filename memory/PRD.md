@@ -27,14 +27,15 @@ Later additions: bulk story extraction with curation; direct YouTube/Instagram p
 
 ## Implemented
 - 2026-09-11/12 (session 1): full pipeline end-to-end, 3 channels, editor+fact-check agent, viral scorer, news desk, YouTube OAuth, engagement, 977-page Bhagwat ingest, 11/11 tests
-- 2026-09-12 (session 3, current): 
-  - **App unlocked** — mandatory sign-in wall removed (user was locked out); Google sign-in is now OPTIONAL (Sign in chip → /login); only /api/admin/* still requires an admin session (401/403 enforced)
-  - **Two production modes** (per-story): slide-based (image slides + infographics + narration) and AI-clip mode; image chain priority OpenAI → HF FLUX.1-schnell → fal.ai; video chain priority Gemini Veo (LRO REST) → Replicate (Wan 2.1) → fal.ai (Wan/CogVideoX); Ken Burns + procedural frames remain the never-fail local fallback; FREE TTS first (kokoro → xtts → gtts, per-type voice specs like kokoro:hm_omega)
-  - **Create from Script/Prompt** (/create): paste script or idea → 8 video-type registry (mythology_moral, folk_horror, motivational, kids_fables, educational, business, farming, tech) auto-selects voice/music/tone/style via auto-seeded channels (vt-*); flexible length 30–240s (chunks cap raised to 24)
-  - **Script review & edit before media generation**: PATCH /stories/{id}/script with inline editor UI (voiceover/visual/video_prompt), cache-aware (edited segments re-render)
-  - **Progress tracker**: Script → Voices → Media → Compiled → QA → Review → Uploaded (+ published status)
-  - **API Keys Vault** in Settings: all 11 keys user-configurable (masked, allow-listed, hot-applied to env, persisted in db.settings, reloaded at startup)
-  - Testing: iteration_3 = 21/21 backend + 100% frontend testids
+- 2026-09-13 (session 4, current):
+  - User's 3-part bug report fixed + verified (iteration_5: 13/13 backend, 100% frontend):
+    - Image-less videos: diagnosed with live probes — Gemini image 429 (free-tier quota), OpenAI 429 zero credits, fal locked, universal key over budget → billing state, not code. CODE fix for the retry storm: imagegen caps every provider at 35s, single nano-banana attempt, and a 10-min dead-circuit after one full-chain failure (was 240s waits × retries = 8-10 min per image call)
+    - Review tail slowness: QA + metadata now run in PARALLEL (gather); thumbnail reuses the hook slide (frames/00.png) with zero image-API calls (was a full dead-chain churn)
+    - Engagement agent schedule: default 6h, configurable 0.25-72h live (GET/PUT /api/settings/scheduler + Settings UI 'Automation Schedule' card; periodic loop re-reads every cycle)
+  - Storyboard one-shot mode hardened: poster+tiles cache → re-renders skip the AI call entirely; full storyboard render verified at 110-165s end-to-end (was 12+ min)
+  - New keys applied (Gemini text works; OpenAI chat works via Gemini; image billing still exhausted)
+  - Queue-pause flag now persists across restarts (hydrated from db.settings at startup)
+- 2026-09-12 (session 3): app unlocked (optional Google login), slide/clip/storyboard modes, create-from-script page, 8 video types, script editor, API keys vault, flexible length, stop/pause, Ollama/Qwen wiring, admin console, Instagram integrations page, draft-only engagement, Improvement Coach, XTTS v2 verified live
 - 2026-09-12 (session 2): Google-only login (now optional), Admin Console, Instagram Integrations page (live-validated), draft-only engagement, Improvement Coach (max 2 rounds, keep-only-if-score-improves), XTTS v2 verified live, qwen_local capability-gated provider, disk hardening (/app+/root share 9.8G; model caches moved to /var/cache)
 - Provider billing states (not code bugs): fal.ai account LOCKED (exhausted balance — fal.ai/dashboard/billing), Emergent universal key budget exceeded, OpenAI unfunded, Gemini cyclic rate limits. HF_TOKEN/REPLICATE_API_TOKEN unset → add in Settings → API Keys. Until quotas recover, videos render with procedural mandala frames + Ken Burns and Kokoro/gTTS voice.
 

@@ -9,6 +9,9 @@ from services.ocr import MEDIA_ROOT
 
 IMAGE_PRICE = 0.03
 
+# epoch until which cloud image providers are skipped (set after a full-chain failure)
+_IMAGE_DEAD_UNTIL = 0.0
+
 
 def _ref_bytes(ref_image):
     if ref_image and Path(ref_image).exists():
@@ -17,22 +20,31 @@ def _ref_bytes(ref_image):
 
 
 async def generate_image(prompt: str, out_path: Path, ref_image: Path = None, session: str = "img"):
+    """AI image with hard 35s caps per provider; after one full-chain failure the cloud providers
+    are skipped for 10 minutes (kills the litellm retry storm that made renders crawl)."""
+    global _IMAGE_DEAD_UNTIL
+    import time
+
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ref = _ref_bytes(ref_image)
+
+    if time.time() < _IMAGE_DEAD_UNTIL:
+        await asyncio.to_thread(procedural_frame, prompt, out_path)
+        return False
 
     ek = gemini.emergent_key()
     if ek:
         try:
             await asyncio.wait_for(
-                _gen_gemini_proxy(ek, prompt, out_path, ref_image, session), timeout=240)
+                _gen_gemini_proxy(ek, prompt, out_path, ref_image, session), timeout=35)
             return True
         except Exception as e:
             print(f"[media] emergent nano-banana failed: {str(e)[:120]}", flush=True)
 
     if gemini.gemini_key() and not gemini.circuit_open():
         try:
-            data = await asyncio.wait_for(gemini.gen_image(prompt, ref), timeout=240)
+            data = await asyncio.wait_for(gemini.gen_image(prompt, ref), timeout=35)
             out_path.write_bytes(data)
             return True
         except Exception as e:
@@ -41,11 +53,12 @@ async def generate_image(prompt: str, out_path: Path, ref_image: Path = None, se
     ok = gemini.openai_key()
     if ok:
         try:
-            await _gen_openai_image(ok, prompt, out_path)
+            await asyncio.wait_for(_gen_openai_image(ok, prompt, out_path), timeout=35)
             return True
         except Exception as e:
             print(f"[media] openai image failed: {str(e)[:120]}", flush=True)
 
+    _IMAGE_DEAD_UNTIL = time.time() + 600  # all cloud providers dead — stop hammering for 10 min
     await asyncio.to_thread(procedural_frame, prompt, out_path)
     return False
 
@@ -54,27 +67,22 @@ async def _gen_gemini_proxy(key, prompt, out_path, ref_image, session):
     import uuid
     from emergentintegrations.llm.chat import ImageContent, LlmChat, UserMessage
 
-    for attempt in range(2):
-        try:
-            chat = LlmChat(
-                api_key=key, session_id=f"{session}-{uuid.uuid4().hex[:8]}",
-                system_message="You are a world-class cinematic artist creating viral mythological video visuals.",
-            ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
-            if ref_image and Path(ref_image).exists():
-                b64 = base64.b64encode(Path(ref_image).read_bytes()).decode()
-                msg = UserMessage(text=prompt[:2200], file_contents=[ImageContent(b64)])
-            else:
-                msg = UserMessage(text=prompt[:2200])
-            _, images = await chat.send_message_multimodal_response(msg)
-            if not images:
-                raise RuntimeError("no images")
-            out_path.write_bytes(base64.b64decode(images[0]["data"]))
-            return
-        except Exception as e:
-            if attempt == 1:
-                raise
-            print(f"[media] nano-banana attempt {attempt + 1} failed: {str(e)[:100]}", flush=True)
-            await asyncio.sleep(8)
+    try:
+        chat = LlmChat(
+            api_key=key, session_id=f"{session}-{uuid.uuid4().hex[:8]}",
+            system_message="You are a world-class cinematic artist creating viral mythological video visuals.",
+        ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
+        if ref_image and Path(ref_image).exists():
+            b64 = base64.b64encode(Path(ref_image).read_bytes()).decode()
+            msg = UserMessage(text=prompt[:2200], file_contents=[ImageContent(b64)])
+        else:
+            msg = UserMessage(text=prompt[:2200])
+        _, images = await chat.send_message_multimodal_response(msg)
+        if not images:
+            raise RuntimeError("no images")
+        out_path.write_bytes(base64.b64decode(images[0]["data"]))
+    except Exception as e:
+        raise
 
 
 async def _gen_openai_image(key, prompt, out_path):
