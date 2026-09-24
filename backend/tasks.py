@@ -74,11 +74,16 @@ async def run_script_job(job, setp):
     script, cost = await agents.write_script(story, channel or {},
                                              int(story.get("target_seconds") or 90))
     cs = script.get("character_sheet") or {}
+    current_sheet = story.get("character_sheet") or {}
+    anchor = (current_sheet.get("anchor") if current_sheet.get("locked") else "") or cs.get("anchor", "")
+    script["character_sheet"] = {**cs, "anchor": anchor}
     update = {
         "script": script, "status": "script_ready", "stage": "Script ready",
         "character_sheet": {
-            "anchor": cs.get("anchor", ""),
-            "text": json.dumps(cs, ensure_ascii=False)[:2000],
+            "anchor": anchor,
+            "text": anchor,
+            "locked": bool(current_sheet.get("locked")),
+            "version": int(current_sheet.get("version") or 1),
         },
         "updated_at": utcnow(),
     }
@@ -94,7 +99,14 @@ async def run_produce_job(job, setp):
 async def run_segment_fix_job(job, setp):
     from pipeline import regenerate_segment
     payload = job.get("payload") or {}
-    await regenerate_segment(job["ref_id"], int(payload.get("index", 0)), setp)
+    await regenerate_segment(job["ref_id"], int(payload.get("index", 0)), setp,
+                             kind=str(payload.get("kind") or "all"))
+
+
+async def run_edit_request_job(job, setp):
+    from pipeline import apply_review_edits
+    notes = str((job.get("payload") or {}).get("notes") or "").strip()
+    await apply_review_edits(job["ref_id"], notes, setp)
 
 
 async def run_improve_job(job, setp):
@@ -225,6 +237,7 @@ def register_all():
     register("script", run_script_job)
     register("produce", run_produce_job)
     register("segment_fix", run_segment_fix_job)
+    register("edit_request", run_edit_request_job)
     register("publish", run_publish_job)
     register("improve", run_improve_job)
     register("engagement", run_engagement_job)

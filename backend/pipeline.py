@@ -95,20 +95,22 @@ async def _editor_pass(story_id, story, channel, set_story):
 
 
 async def _character_sheet(story_id, story, mode, anchor, style):
+    from services import router
+
     char_path = MEDIA_ROOT / "char" / f"{story_id}.png"
-    if mode == "storyboard":
-        return char_path  # one-shot poster replaces the per-segment images and the character sheet
     if not char_path.exists():
-        ai_ok = await media.generate_image(
-            f"Character reference sheet, single illustration on plain dark backdrop, vertical 9:16. "
-            f"Art style: {style}. Characters: {anchor}. Clean detailed lineup, no text, no watermark.",
-            char_path, session=f"char-{story_id}")
-        if ai_ok:
+        result = await router.image(
+            f"STRICT VISUAL CONTINUITY REFERENCE. {anchor} "
+            f"Render a clean full-body character lineup and small environment swatches in exactly this art direction: {style}. "
+            "Show every named recurring character once, clearly separated, with stable face, hair, clothing colors, accessories, build and aura. "
+            "Indian miniature-painting linework and materials where requested. Neutral backdrop, delicate ornamental border, no labels, no text, no watermark.",
+            char_path, session=f"char-{story_id}", quality_required=True)
+        if result.get("provider") not in ("procedural", "pexels"):
             await _save_cost(story_id, "image", media.IMAGE_PRICE)
     return char_path
 
 
-async def _storyboard_poster(story_id, chunks, style, channel, set_story, setp, job_id):
+async def _storyboard_poster(story_id, chunks, style, anchor, char_path, channel, set_story, setp, job_id):
     from job_queue import is_cancelled, JobCancelled
     from services import storyboard
 
@@ -117,7 +119,7 @@ async def _storyboard_poster(story_id, chunks, style, channel, set_story, setp, 
     await set_story_async(story_id, stage="Storyboard poster")
     await setp(8, "One-shot storyboard: all slides in a single image")
     slides = await storyboard.generate_storyboard(
-        chunks, MEDIA_ROOT / "frames" / story_id, style, channel)
+        chunks, MEDIA_ROOT / "frames" / story_id, style, anchor, char_path, channel)
     await setp(30, f"Poster sliced into {len(slides)} slides")
     return slides
 
@@ -149,11 +151,15 @@ async def _render_segment(ctx, i, chunk, audio_urls, frame_urls, sem, setp, job_
         frame = MEDIA_ROOT / "frames" / aid / f"{i:02d}.png"
         if not frame.exists():
             res = await router.image(
-                f"{ctx['style']}. {chunk.get('video_prompt', chunk.get('visual', ''))} "
-                f"Vertical 9:16 composition, cinematic, highly detailed, no text, no watermark. "
-                f"Recurring character appearance MUST match this reference sheet exactly: {ctx['anchor'][:600]}",
+                f"STRICT CONTINUITY LOCK — copy every visible recurring character from the attached reference image and this bible exactly: {ctx['anchor']} "
+                f"ART DIRECTION LOCK: {ctx['style']}. "
+                f"SCENE FOR THIS SEGMENT: {chunk.get('video_prompt', chunk.get('visual', ''))}. "
+                "Vertical 9:16 composition, cohesive Indian miniature-painting treatment where specified, delicate linework, rich pigment, gold-leaf accents, "
+                "natural anatomy and hands, expressive faces, layered depth, cinematic lighting, highly detailed, no text, no watermark. "
+                "Do not redesign faces, clothing, palette, architecture, or illustration medium.",
                 frame, ref_image=ctx["char_path"], session=f"frame-{aid}-{i}",
-                query_hint=chunk.get("video_prompt") or chunk.get("visual") or "")
+                query_hint=chunk.get("video_prompt") or chunk.get("visual") or "",
+                require_reference=True, quality_required=True)
             if res.get("provider") not in ("procedural",):
                 await _save_cost(aid, "image", media.IMAGE_PRICE)
 
@@ -172,9 +178,11 @@ async def _render_segment(ctx, i, chunk, audio_urls, frame_urls, sem, setp, job_
         vid_res = {"provider": "kenburns"}
         if ctx["mode"] == "clip":
             vid_res = await router.video(
-                f"{ctx['style']}. {chunk.get('video_prompt', chunk.get('visual', ''))} "
-                f"Characters must match: {ctx['anchor'][:400]}",
-                ctx["char_path"], MEDIA_ROOT / "tmp" / f"{aid}-raw-{i:02d}.mp4", dur + silence_pad)
+                f"STRICT CONTINUITY LOCK: {ctx['anchor']} ART DIRECTION: {ctx['style']}. "
+                f"SCENE: {chunk.get('video_prompt', chunk.get('visual', ''))}. "
+                "Keep identical faces, hair, clothing, accessories, body proportions, palette, linework, lighting language and recurring locations.",
+                frame, MEDIA_ROOT / "tmp" / f"{aid}-raw-{i:02d}.mp4", dur + silence_pad,
+                preserve_reference=True)
         hook_card = None
         if i == 0:
             hook_card = await asyncio.to_thread(
@@ -268,18 +276,21 @@ async def _metadata_pass(story, channel):
 
 
 async def _thumbnail(story, channel, ctx, meta, char_path):
+    from services import router
+
     aid = ctx["story_id"]
     main_char = (story.get("characters") or [{}])[0]
     # reuse the hook slide as thumbnail art — zero extra image-API calls (this was the slow tail)
     thumb_art = MEDIA_ROOT / "frames" / aid / "00.png"
     if not thumb_art.exists():
         thumb_art = MEDIA_ROOT / "tmp" / f"{aid}-thumb-raw.png"
-        ai_ok = await media.generate_image(
+        result = await router.image(
             f"Dramatic viral YouTube Shorts thumbnail artwork, vertical 9:16, extreme emotional close-up, "
             f"high contrast rim lighting, {ctx['style']}. Main character: {main_char.get('description', ctx['anchor'][:300])}. "
-            f"Scene: {story.get('climax', '')}. No text, no watermark.",
-            thumb_art, ref_image=char_path, session=f"thumb-{aid}")
-        if ai_ok:
+            f"Full continuity lock: {ctx['anchor']}. Scene: {story.get('climax', '')}. No text, no watermark.",
+            thumb_art, ref_image=char_path, session=f"thumb-{aid}",
+            require_reference=True, quality_required=True)
+        if result.get("provider") not in ("procedural", "pexels"):
             await _save_cost(aid, "image", media.IMAGE_PRICE)
     thumb_path = MEDIA_ROOT / "thumbs" / f"{aid}.jpg"
     await asyncio.to_thread(
@@ -289,6 +300,7 @@ async def _thumbnail(story, channel, ctx, meta, char_path):
 
 
 async def produce_video(story_id: str, setp, job_id=""):
+    import shutil
     from job_queue import is_cancelled, JobCancelled
     from services.ocr import disk_guard
 
@@ -306,6 +318,12 @@ async def produce_video(story_id: str, setp, job_id=""):
     if not chunks:
         raise RuntimeError("story has no script — generate the script first")
     chunks = chunks[:24]
+
+    consistency_sheet = story.get("character_sheet") or {}
+    if consistency_sheet.get("visuals_stale"):
+        (MEDIA_ROOT / "char" / f"{story_id}.png").unlink(missing_ok=True)
+        for sub in ("frames", "clips"):
+            shutil.rmtree(MEDIA_ROOT / sub / story_id, ignore_errors=True)
 
     await set_story(status="rendering", stage="Fact check & edit")
     await setp(2, "Fact check & editor pass")
@@ -326,7 +344,7 @@ async def produce_video(story_id: str, setp, job_id=""):
     if job_id and is_cancelled(job_id):
         raise JobCancelled()
     if mode == "storyboard":
-        ctx["slides"] = await _storyboard_poster(story_id, chunks, style, channel, set_story, setp, job_id)
+        ctx["slides"] = await _storyboard_poster(story_id, chunks, style, anchor, char_path, channel, set_story, setp, job_id)
 
     audio_urls, frame_urls = await _render_all_segments(ctx, setp, job_id)
     main, mixed, final = await _assemble_video(ctx, setp)
@@ -345,6 +363,7 @@ async def produce_video(story_id: str, setp, job_id=""):
         Path(inter).unlink(missing_ok=True)
     await set_story(
         status="in_review", stage="Awaiting review",
+        character_sheet={**(story.get("character_sheet") or {}), "visuals_stale": False},
         qa=qa if isinstance(qa, dict) else {},
         metadata=meta if isinstance(meta, dict) else {},
         media={
@@ -358,43 +377,97 @@ async def produce_video(story_id: str, setp, job_id=""):
     )
 
 
-async def regenerate_segment(story_id: str, index: int, setp):
+async def regenerate_segment(story_id: str, index: int, setp, kind: str = "all"):
+    from services import router
     story = await _load_story(story_id)
     channel = await _load_channel(story)
     chunks = (story.get("script") or {}).get("chunks") or []
     if index < 0 or index >= len(chunks):
         raise RuntimeError("invalid segment index")
+    if kind not in {"script", "voice", "visual", "all"}:
+        raise RuntimeError("invalid regeneration kind")
     chunk = chunks[index]
     aid = story_id
+    had_video = bool((story.get("media") or {}).get("final"))
+
+    if kind == "script":
+        await set_story_async(story_id, stage=f"Regenerating script · segment {index + 1}", status="rendering")
+        await setp(20, f"Rewriting segment {index + 1}")
+        rewritten, cost = await agents.regenerate_chunk(story, channel, index)
+        for key in ("voiceover", "visual", "video_prompt"):
+            chunk[key] = str(rewritten.get(key) or chunk.get(key) or "")[:2500]
+        _invalidate_caches(story_id, {index})
+        story["script"]["chunks"] = chunks
+        await _save_cost(story_id, "llm", cost)
+        await set_story_async(
+            story_id, script=story["script"],
+            status="in_review" if had_video else "script_ready",
+            stage=f"Script updated · segment {index + 1} ready to render")
+        return
 
     await set_story_async(story_id, stage=f"Regenerating segment {index + 1}", status="rendering")
     await setp(10, f"Segment {index + 1}")
 
     audio_dir = MEDIA_ROOT / "audio" / aid
     aud = audio_dir / f"{index:02d}.mp3"
-    adur = await media.synthesize_voice(chunk.get("voiceover", ""), channel.get("voice", ""),
-                                        channel.get("voice_speed", 1.0), aud,
-                                        lang_hint=channel.get("language", "hi"),
-                                        direction=f"{chunk.get('emotion') or 'storytelling'} emotion, "
-                                                  f"{chunk.get('pace') or 'medium'} pace",
-                                        expressive=channel.get("expressive_voice", True))
-    await _save_cost(story_id, "tts", media.tts_cost(chunk.get("voiceover", "")))
+    if kind in {"all", "voice"} or not aud.exists():
+        adur = await media.synthesize_voice(chunk.get("voiceover", ""), channel.get("voice", ""),
+                                            channel.get("voice_speed", 1.0), aud,
+                                            lang_hint=channel.get("language", "hi"),
+                                            direction=f"{chunk.get('emotion') or 'storytelling'} emotion, "
+                                                      f"{chunk.get('pace') or 'medium'} pace",
+                                            expressive=channel.get("expressive_voice", True))
+        await _save_cost(story_id, "tts", media.tts_cost(chunk.get("voiceover", "")))
+    else:
+        adur = media.ffprobe_duration(aud)
     dur = max(6.0, min(16.0, adur + 0.6))
 
     frame = MEDIA_ROOT / "frames" / aid / f"{index:02d}.png"
-    ai_ok = await media.generate_image(
-        f"{channel.get('style_prefix') or story.get('visual_style', '')}. "
-        f"{chunk.get('video_prompt', chunk.get('visual', ''))} Vertical 9:16, cinematic, no text.",
-        frame, ref_image=MEDIA_ROOT / "char" / f"{aid}.png", session=f"frame-{aid}-{index}-r")
-    if ai_ok:
-        await _save_cost(story_id, "image", media.IMAGE_PRICE)
+    char_path = MEDIA_ROOT / "char" / f"{aid}.png"
+    if kind in {"all", "visual"} or not frame.exists():
+        if (story.get("character_sheet") or {}).get("visuals_stale"):
+            char_path.unlink(missing_ok=True)
+            await _character_sheet(
+                story_id, story, story.get("mode") or "slide",
+                (story.get("character_sheet") or {}).get("anchor", ""),
+                channel.get("style_prefix") or story.get("visual_style") or "Indian miniature painting style")
+        visual_prompt = (
+            f"STRICT CONTINUITY LOCK — copy every visible character from the reference and this bible exactly: {(story.get('character_sheet') or {}).get('anchor', '')}. "
+            f"ART DIRECTION LOCK: {channel.get('style_prefix') or story.get('visual_style', '')}. "
+            f"{chunk.get('video_prompt', chunk.get('visual', ''))}. "
+            "Clear subject and readable facial expressions, natural anatomy and hands, strong foreground/midground/background separation, "
+            "coherent lighting, rich material detail, cinematic composition, no text, no watermark. Do not redesign identity, clothing, palette, or medium."
+        )
+        res = await router.image(visual_prompt, frame, ref_image=char_path if char_path.exists() else None,
+                                 session=f"frame-{aid}-{index}-r", query_hint=chunk.get("visual"),
+                                 require_reference=True, quality_required=True)
+        if res.get("provider") not in ("procedural",):
+            await _save_cost(story_id, "image", media.IMAGE_PRICE)
 
     cap = MEDIA_ROOT / "tmp" / f"{aid}-{index:02d}.png"
     await asyncio.to_thread(media.render_caption, chunk.get("voiceover", ""), cap)
     clip = MEDIA_ROOT / "clips" / aid / f"{index:02d}.mp4"
-    await media.make_segment_clip(frame, aud, cap, clip, chunk.get("camera", "zoom_in"), dur)
+    if kind == "voice" and clip.exists() and (story.get("mode") or "slide") == "clip":
+        tmp_clip = clip.with_suffix(".voice.mp4")
+        await media.run_ffmpeg("ffmpeg", "-y", "-i", str(clip), "-i", str(aud),
+                               "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac",
+                               "-b:a", "192k", "-shortest", str(tmp_clip))
+        tmp_clip.replace(clip)
+    elif (story.get("mode") or "slide") == "clip" and kind in {"visual", "all"}:
+        raw = MEDIA_ROOT / "tmp" / f"{aid}-raw-{index:02d}-r.mp4"
+        video_res = await router.video(
+            f"STRICT CONTINUITY LOCK: {(story.get('character_sheet') or {}).get('anchor', '')}. "
+            f"ART DIRECTION: {channel.get('style_prefix') or story.get('visual_style', '')}. "
+            f"SCENE: {chunk.get('video_prompt', chunk.get('visual', ''))}. Match the reference image exactly.",
+            frame, raw, dur, preserve_reference=True)
+        if video_res.get("provider") == "kenburns":
+            await media.make_segment_clip(frame, aud, cap, clip, chunk.get("camera", "zoom_in"), dur)
+        else:
+            await media.compose_ai_clip(raw, aud, cap, clip, dur)
+    else:
+        await media.make_segment_clip(frame, aud, cap, clip, chunk.get("camera", "zoom_in"), dur)
 
-    setp(70, "Re-stitching")
+    await setp(70, "Re-stitching")
     final = await _restitch(story, channel, aid, chunks)
 
     await set_story_async(
@@ -404,6 +477,43 @@ async def regenerate_segment(story_id: str, index: int, setp):
                "duration_sec": round(media.ffprobe_duration(final), 1),
                "audio": [f"/api/media/audio/{aid}/{i:02d}.mp3" for i in range(len(chunks))],
                "frames": [f"/api/media/frames/{aid}/{i:02d}.png" for i in range(len(chunks))]})
+
+
+async def apply_review_edits(story_id: str, notes: str, setp):
+    story = await _load_story(story_id)
+    channel = await _load_channel(story)
+    chunks = (story.get("script") or {}).get("chunks") or []
+    if not chunks:
+        raise RuntimeError("story has no script to edit")
+    await set_story_async(story_id, stage="Applying requested edits", status="rendering", error="")
+    await setp(15, "Reading review notes")
+    suggestion, cost = await agents.apply_review_edits(story, channel, notes)
+    await _save_cost(story_id, "llm", cost)
+    changed = set()
+    for edit in suggestion.get("edits") or []:
+        try:
+            idx = int(edit.get("index", -1))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < len(chunks):
+            for key in ("voiceover", "visual", "video_prompt", "camera", "emotion"):
+                if edit.get(key) is not None:
+                    chunks[idx][key] = str(edit[key])[:2500]
+                    changed.add(idx)
+    _invalidate_caches(story_id, changed)
+    script = story.get("script") or {}
+    script["chunks"] = chunks
+    await setp(80, f"Updated {len(changed)} segment(s)")
+    await db.stories.update_one({"_id": story_id}, {"$set": {
+        "script": script,
+        "status": "edits_requested",
+        "stage": suggestion.get("summary") or "Edits applied — ready to re-render",
+        "review_notes": notes,
+        "updated_at": utcnow(),
+    }, "$push": {"edit_requests": {
+        "notes": notes, "summary": suggestion.get("summary", ""),
+        "segments": sorted(changed), "at": utcnow(),
+    }}})
 
 
 async def _restitch(story, channel, aid, chunks):

@@ -27,7 +27,7 @@ function StoryHeader({ story, channel, chunks, busy, genScript, produce }) {
           )}
           {story.mode && (
             <Badge variant="outline" className="border-cyan-500/40 text-[11px] text-cyan-300">
-              {story.mode === "clip" ? "AI video clips" : story.mode === "storyboard" ? "Instant storyboard" : story.mode === "stitch" ? "Your media, stitched" : "Slide-based"}
+              {story.mode === "clip" ? "Continuity-locked animated clips" : story.mode === "storyboard" ? "Unified storyboard" : story.mode === "stitch" ? "Your media, stitched" : "Slide-based"}
             </Badge>
           )}
           {!!story.target_seconds && <Badge variant="outline" className="border-white/15 font-mono2 text-slate-400">~{story.target_seconds}s</Badge>}
@@ -127,8 +127,8 @@ function RenderConfig({ story, onSave }) {
         <select data-testid="mode-select" value={story.mode || "slide"} onChange={(e) => onSave({ mode: e.target.value })}
           className="rounded-lg border border-white/15 bg-black/40 px-2 py-1.5 text-xs text-slate-200">
           <option value="slide">Slide-based — image slides + infographics</option>
-          <option value="storyboard">Instant storyboard — one AI image, sliced</option>
-          <option value="clip">AI video clips per scene</option>
+          <option value="storyboard">Unified storyboard — one consistent contact sheet, sliced</option>
+          <option value="clip">Continuity-locked animated scene frames</option>
         </select>
       </div>
       <div className="flex items-center gap-2 text-xs text-slate-300">
@@ -178,12 +178,54 @@ function ImprovementCoach({ story, busy, onImprove }) {
   );
 }
 
-function CharacterPanel({ story, media }) {
+function CharacterPanel({ story, media, busy, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(story.character_sheet?.anchor || "");
+  const beginEdit = () => {
+    setDraft(story.character_sheet?.anchor || "");
+    setEditing(true);
+  };
+  const save = async () => {
+    await onSave(draft);
+    setEditing(false);
+  };
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="card-glow rounded-2xl border border-amber-500/10 bg-[#12141F] p-6 lg:col-span-2">
-        <h3 className="mb-2 font-display text-lg font-semibold text-amber-300">Character Consistency Sheet</h3>
-        <p data-testid="character-sheet-anchor" className="text-sm leading-relaxed text-slate-300">{story.character_sheet?.anchor || "—"}</p>
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 data-testid="character-sheet-title" className="font-display text-lg font-semibold text-amber-300">Character &amp; Style Consistency Sheet</h3>
+            <p data-testid="character-sheet-guidance" className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
+              Canonical continuity lock for every frame: faces, age, hair, skin tone, build, clothing, accessories, art medium, palette, lighting, architecture and recurring locations.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {story.character_sheet?.locked && <Badge data-testid="character-sheet-locked-badge" variant="outline" className="border-emerald-500/40 text-emerald-300">Locked · v{story.character_sheet?.version || 1}</Badge>}
+            {!editing && story.status !== "rendering" && (
+              <Button data-testid="edit-character-sheet-button" size="sm" variant="outline" className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10" onClick={beginEdit}>
+                <Wand2 className="mr-1.5 h-3.5 w-3.5" /> Edit sheet
+              </Button>
+            )}
+          </div>
+        </div>
+        {editing ? (
+          <div className="space-y-3">
+            <Textarea data-testid="character-sheet-edit-input" value={draft} onChange={(e) => setDraft(e.target.value)} rows={12}
+              placeholder="Define the immutable art style first, then every recurring character's exact face, age, skin tone, hair, build, clothing colors, accessories and aura; finish with recurring locations, architecture, props, palette and lighting."
+              className="border-white/15 bg-black/40 text-sm leading-relaxed text-slate-100" />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span data-testid="character-sheet-character-count" className={`text-xs ${draft.trim().length < 80 ? "text-rose-300" : "text-slate-500"}`}>{draft.trim().length} characters · minimum 80</span>
+              <div className="flex gap-2">
+                <Button data-testid="cancel-character-sheet-button" size="sm" variant="outline" className="border-white/20 text-slate-300" onClick={() => setEditing(false)}>Cancel</Button>
+                <Button data-testid="save-character-sheet-button" size="sm" disabled={busy || draft.trim().length < 80} className="bg-amber-500 font-semibold text-[#090A0F] hover:bg-amber-400" onClick={save}>
+                  <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Save continuity lock
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p data-testid="character-sheet-anchor" className="whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{story.character_sheet?.anchor || "No consistency sheet yet — add one before generating visuals."}</p>
+        )}
         <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-400">
           {(story.characters || []).map((c, i) => (
             <span key={`char-${c.name || i}`} className="rounded-full bg-black/30 px-3 py-1">{c.name}: {c.description}</span>
@@ -192,7 +234,8 @@ function CharacterPanel({ story, media }) {
       </div>
       {media.char_sheet && (
         <div className="card-glow overflow-hidden rounded-2xl border border-amber-500/10 bg-[#12141F]">
-          <img data-testid="character-sheet-image" src={`${MEDIA}${media.char_sheet}`} alt="character sheet" className="h-64 w-full object-cover" />
+          <img data-testid="character-sheet-image" src={`${MEDIA}${media.char_sheet}?v=${story.character_sheet?.version || 1}`} alt="character sheet" className="h-64 w-full object-cover" />
+          <p data-testid="character-sheet-image-caption" className="border-t border-white/5 px-4 py-3 text-[11px] leading-relaxed text-slate-500">Visual identity reference supplied to every image-capable generation path.</p>
         </div>
       )}
     </div>
@@ -219,7 +262,7 @@ function SegmentRow({ chunk, i, media, editing, drafts, setDraft, regen, busy })
               onChange={(e) => setDraft(i, { voiceover: e.target.value })}
               className="font-deva border-white/15 bg-black/40 text-base text-slate-100" />
           ) : (
-            <p data-testid="segment-voiceover" className="font-deva text-lg font-medium leading-relaxed text-slate-100">“{chunk.voiceover}”</p>
+            <p data-testid={`segment-voiceover-${i}`} className="font-deva text-lg font-medium leading-relaxed text-slate-100">“{chunk.voiceover}”</p>
           )}
           {editing ? (
             <div className="mt-3 space-y-2">
@@ -238,20 +281,28 @@ function SegmentRow({ chunk, i, media, editing, drafts, setDraft, regen, busy })
           <div className="mt-4 flex items-center gap-3">
             {media.audio?.[i] && (
               <div className="flex items-center gap-2 rounded-full bg-black/40 px-3 py-1.5">
-                <button data-testid="play-segment-audio-button" onClick={() => document.getElementById(`seg-audio-${i}`)?.play()} className="text-amber-300 hover:text-amber-200">
+                <button data-testid={`play-segment-audio-button-${i}`} onClick={() => document.getElementById(`seg-audio-${i}`)?.play()} className="text-amber-300 hover:text-amber-200">
                   <Play className="h-4 w-4" />
                 </button>
                 <audio id={`seg-audio-${i}`} src={`${MEDIA}${media.audio[i]}`} preload="none" controls className="h-8 max-w-52" />
               </div>
             )}
-            <Button data-testid="regenerate-segment-video-button" size="sm" variant="outline" className="border-white/20 text-slate-300 hover:bg-white/5" disabled={busy} onClick={() => regen(i)}>
-              <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Regenerate
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button data-testid={`regenerate-segment-script-button-${i}`} size="sm" variant="outline" className="border-amber-500/30 text-amber-300 hover:bg-amber-500/10" disabled={busy} onClick={() => regen(i, "script")}>
+                <Wand2 className="mr-1.5 h-3.5 w-3.5" /> Script
+              </Button>
+              <Button data-testid={`regenerate-segment-voice-button-${i}`} size="sm" variant="outline" className="border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10" disabled={busy} onClick={() => regen(i, "voice")}>
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Voice
+              </Button>
+              <Button data-testid={`regenerate-segment-visual-button-${i}`} size="sm" variant="outline" className="border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10" disabled={busy} onClick={() => regen(i, "visual")}>
+                <Sparkles className="mr-1.5 h-3.5 w-3.5" /> Image / clip
+              </Button>
+            </div>
           </div>
         </div>
         {media.frames?.[i] && (
           <div className="overflow-hidden rounded-xl lg:col-span-2">
-            <img data-testid="segment-frame-image" src={`${MEDIA}${media.frames[i]}`} alt={`frame ${i + 1}`} className="h-56 w-full object-cover ring-1 ring-white/10" />
+            <img data-testid={`segment-frame-image-${i}`} src={`${MEDIA}${media.frames[i]}`} alt={`frame ${i + 1}`} className="h-56 w-full object-cover ring-1 ring-white/10" />
           </div>
         )}
       </div>
@@ -347,6 +398,7 @@ function ResultsGrid({ story, media }) {
 
 function ReviewBar({ story, busy, review }) {
   const [notes, setNotes] = useState("");
+  const [open, setOpen] = useState(false);
   return (
     <div data-testid="review-bar" className="card-glow flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-purple-500/25 bg-purple-950/20 p-6">
       <div>
@@ -358,7 +410,7 @@ function ReviewBar({ story, busy, review }) {
         <Button data-testid="review-approve-button" disabled={busy} className="bg-emerald-500 font-semibold text-[#090A0F] hover:bg-emerald-400" onClick={() => review("approve")}>
           <CheckCircle2 className="mr-2 h-4 w-4" /> Approve for Upload
         </Button>
-        <Dialog>
+        <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button data-testid="review-request-edits-button" disabled={busy} variant="outline" className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10">
               <Wand2 className="mr-2 h-4 w-4" /> Request Edits
@@ -367,7 +419,7 @@ function ReviewBar({ story, busy, review }) {
           <DialogContent className="border-amber-500/20 bg-[#12141F]">
             <DialogHeader><DialogTitle className="font-display text-amber-300">Request Edits</DialogTitle></DialogHeader>
             <Textarea data-testid="edit-notes-input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. segment 3 visual shows the wrong character; slow down the climax narration…" className="border-white/10 bg-black/30 text-slate-200" rows={4} />
-            <Button data-testid="submit-edit-request-button" onClick={() => review("request_edits", notes)} className="bg-amber-500 font-semibold text-[#090A0F] hover:bg-amber-400">Submit</Button>
+            <Button data-testid="submit-edit-request-button" disabled={!notes.trim()} onClick={async () => { await review("request_edits", notes.trim()); setNotes(""); setOpen(false); }} className="bg-amber-500 font-semibold text-[#090A0F] hover:bg-amber-400">Submit</Button>
           </DialogContent>
         </Dialog>
         <Button data-testid="review-reject-button" disabled={busy} variant="outline" className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10" onClick={() => review("reject", "Rejected by reviewer")}>
@@ -397,8 +449,8 @@ export default function StoryDetailPage() {
   const act = async (fn) => { setBusy(true); try { await fn(); refresh(); } catch (e) { toast.error(e?.response?.data?.detail || "Action failed"); } finally { setBusy(false); } };
   const genScript = () => act(() => api.post(`/stories/${id}/script`).then(() => toast.success("Script generation queued")));
   const produce = () => act(() => api.post(`/stories/${id}/produce`).then(() => toast.success("Production pipeline started — voices, frames, clips, stitch, QA")));
-  const regen = (i) => act(() => api.post(`/stories/${id}/segments/${i}/regenerate`).then(() => toast.success(`Regenerating segment ${i + 1}`)));
-  const review = (action, note = "") => act(() => api.post(`/stories/${id}/review`, { action, notes: note }).then(() => toast.success(`Review recorded: ${action.replace("_", " ")}`)));
+  const regen = (i, kind = "all") => act(() => api.post(`/stories/${id}/segments/${i}/regenerate`, { kind }).then(() => toast.success(`${kind === "visual" ? "Image / clip" : kind[0].toUpperCase() + kind.slice(1)} regeneration queued for segment ${i + 1}`)));
+  const review = (action, note = "") => act(() => api.post(`/stories/${id}/review`, { action, notes: note }).then(() => toast.success(action === "request_edits" ? "Edit request queued — the studio will apply your notes" : `Review recorded: ${action.replace("_", " ")}`)));
   const improve = () => act(() => api.post(`/stories/${id}/improve`).then(() => toast.success("Improvement Coach queued — targeted edits, kept only if the score improves")));
   const stopRender = () => act(() => api.post(`/stories/${id}/stop`).then(() => toast.success("Render stopped — completed segments are kept")));
   const publish = (platform) => act(() => api.post(`/stories/${id}/publish`, { platform }).then(() => toast.success(platform === "youtube" ? "YouTube upload queued" : "Instagram Reels upload queued")));
@@ -409,6 +461,11 @@ export default function StoryDetailPage() {
     setEditing(false);
     setDrafts({});
     toast.success("Script updated — edited segments will re-render on next produce");
+  });
+
+  const saveCharacterSheet = (anchor) => act(async () => {
+    await api.patch(`/stories/${id}/character-sheet`, { anchor });
+    toast.success("Consistency sheet locked — all visuals and clips will regenerate on the next render");
   });
 
   const saveConfig = (patch) => act(async () => {
@@ -455,7 +512,7 @@ export default function StoryDetailPage() {
 
       {chunks.length > 0 && (
         <>
-          <CharacterPanel story={story} media={media} />
+          <CharacterPanel story={story} media={media} busy={busy} onSave={saveCharacterSheet} />
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="font-display text-xl font-semibold text-amber-300">Script Segments</h3>

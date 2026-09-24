@@ -322,11 +322,16 @@ async def _veo_video(prompt: str, duration: float) -> bytes:
 
 
 async def image(prompt: str, out_path: Path, ref_image: Path = None, session: str = "img",
-                query_hint: str = None) -> dict:
+                query_hint: str = None, require_reference: bool = False,
+                quality_required: bool = False) -> dict:
     from services import imagegen
 
     for provider in chain("image"):
         if not available(provider):
+            continue
+        if require_reference and provider not in ("openai", "emergent", "gemini"):
+            continue
+        if quality_required and provider in ("pexels", "procedural"):
             continue
         try:
             if provider == "fal_flux":
@@ -366,10 +371,12 @@ async def image(prompt: str, out_path: Path, ref_image: Path = None, session: st
                 _ok(provider)
                 return {"provider": provider}
             if provider == "procedural":
-                await imagegen.generate_image(prompt, out_path, ref_image=ref_image, session=session)
+                await imagegen.generate_image(prompt, out_path, ref_image=ref_image, session=session,
+                                              require_reference=require_reference)
                 return {"provider": "procedural", "ai": False}
             if provider in ("gemini", "emergent", "openai"):
-                ai = await imagegen.generate_image(prompt, out_path, ref_image=ref_image, session=session)
+                ai = await imagegen.generate_image(prompt, out_path, ref_image=ref_image, session=session,
+                                                   require_reference=require_reference)
                 if ai:
                     return {"provider": provider, "ai": True}
                 # imagegen fell through to its local fallback — keep trying the remaining
@@ -461,7 +468,12 @@ async def _replicate_image(prompt: str) -> bytes:
 
 
 # ---------------- VIDEO ----------------
-async def video(prompt: str, ref_image: Path, out_path: Path, duration: float = 10.0) -> dict:
+async def video(prompt: str, ref_image: Path, out_path: Path, duration: float = 10.0,
+                preserve_reference: bool = False) -> dict:
+    # Text-to-video providers in this app do not consume ref_image, so they can redesign faces and style.
+    # For a locked series, animate the approved continuity frame locally instead of accepting that drift.
+    if preserve_reference and ref_image and Path(ref_image).exists():
+        return {"provider": "kenburns", "continuity_locked": True}
     for provider in chain("video"):
         if not available(provider):
             continue

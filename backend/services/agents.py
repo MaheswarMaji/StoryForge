@@ -94,6 +94,54 @@ Return ONLY valid JSON."""
     return data, cost
 
 
+async def regenerate_chunk(story: dict, channel: dict, index: int):
+    chunks = (story.get("script") or {}).get("chunks") or []
+    if index < 0 or index >= len(chunks):
+        raise ValueError("invalid segment index")
+    current = chunks[index]
+    previous = chunks[index - 1] if index > 0 else {}
+    following = chunks[index + 1] if index + 1 < len(chunks) else {}
+    prompt = f"""Rewrite only segment {index + 1} of this short vertical video script.
+
+Keep the story facts, beat ({current.get('beat', 'story')}), language, recurring characters, and continuity intact.
+Make the narration natural to speak in about 8-12 seconds. Make the visual reveal a specific cinematic moment rather than repeating the narration.
+Return ONLY JSON with exactly these string fields: voiceover, visual, video_prompt.
+The video_prompt must be a detailed English prompt for a high-quality 9:16 image/video frame: clear subject, action, setting, lighting, mood, anatomy, composition, no text, no watermark.
+
+CHANNEL: {json.dumps({k: channel.get(k) for k in ('name', 'language', 'tone', 'is_kids')}, ensure_ascii=False)}
+CHARACTER SHEET: {(story.get('character_sheet') or {}).get('anchor', '')[:1800]}
+PREVIOUS SEGMENT: {json.dumps(previous, ensure_ascii=False, default=str)}
+CURRENT SEGMENT: {json.dumps(current, ensure_ascii=False, default=str)}
+NEXT SEGMENT: {json.dumps(following, ensure_ascii=False, default=str)}"""
+    data = await ask_json(SCRIPT_SYSTEM, prompt, session=f"segment-script-{index}")
+    cost = estimate_llm_cost(prompt, json.dumps(data, ensure_ascii=False))
+    if not isinstance(data, dict) or not data.get("voiceover") or not data.get("video_prompt"):
+        raise ValueError("segment rewrite returned incomplete data")
+    return data, cost
+
+
+async def apply_review_edits(story: dict, channel: dict, notes: str):
+    prompt = f"""Apply the reviewer's requested edits to this short vertical video script.
+
+Reviewer notes:
+{notes[:4000]}
+
+Return ONLY JSON with:
+- edits: a list of at most 6 objects, each with index (integer) and any changed string fields among voiceover, visual, video_prompt, camera, emotion
+- summary: one short sentence describing what was changed
+
+Only edit the segments needed by the notes. Preserve source facts, recurring-character continuity, the beat order, and the channel language. Keep video_prompt detailed, cinematic, English, vertical 9:16, with no text or watermark.
+
+CHANNEL: {json.dumps({k: channel.get(k) for k in ('name', 'language', 'tone', 'is_kids')}, ensure_ascii=False)}
+CHARACTER SHEET: {(story.get('character_sheet') or {}).get('anchor', '')[:1800]}
+SCRIPT: {json.dumps(story.get('script') or {}, ensure_ascii=False, default=str)}"""
+    data = await ask_json(EDITOR_SYSTEM, prompt, session="review-edits")
+    cost = estimate_llm_cost(prompt, json.dumps(data, ensure_ascii=False))
+    if not isinstance(data, dict) or not isinstance(data.get("edits"), list):
+        raise ValueError("review edit response was incomplete")
+    return data, cost
+
+
 async def run_qa(story: dict, channel: dict):
     prompt = """QA-check this short-video script. Evaluate:
 1. beats_present — all six beats hook/story/twist/climax/action/lesson appear across chunks (check the "beat" fields AND narrative content)

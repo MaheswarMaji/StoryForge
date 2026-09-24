@@ -20,7 +20,8 @@ def _ref_bytes(ref_image):
     return None
 
 
-async def generate_image(prompt: str, out_path: Path, ref_image: Path = None, session: str = "img"):
+async def generate_image(prompt: str, out_path: Path, ref_image: Path = None, session: str = "img",
+                         require_reference: bool = False):
     """AI image with hard 35s caps per provider; after one full-chain failure the cloud providers
     are skipped for 10 minutes (kills the litellm retry storm that made renders crawl)."""
     global _IMAGE_DEAD_UNTIL
@@ -30,7 +31,12 @@ async def generate_image(prompt: str, out_path: Path, ref_image: Path = None, se
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ref = _ref_bytes(ref_image)
 
+    if require_reference and not ref:
+        raise RuntimeError("a visual reference image is required for continuity-locked generation")
+
     if time.time() < _IMAGE_DEAD_UNTIL:
+        if require_reference:
+            raise RuntimeError("reference-aware image providers are temporarily unavailable")
         await asyncio.to_thread(procedural_frame, prompt, out_path)
         return False
 
@@ -50,6 +56,11 @@ async def generate_image(prompt: str, out_path: Path, ref_image: Path = None, se
             return True
         except Exception as e:
             print(f"[media] gemini image failed: {str(e)[:120]}", flush=True)
+
+    # OpenAI/Stability and local fallbacks in this adapter do not consume the reference image.
+    # Failing explicitly avoids silently replacing locked characters with lookalikes.
+    if require_reference:
+        raise RuntimeError("reference-aware image generation failed; retry instead of accepting character drift")
 
     ok = gemini.openai_key()
     if ok:
@@ -79,13 +90,13 @@ async def _gen_gemini_proxy(key, prompt, out_path, ref_image, session):
     try:
         chat = LlmChat(
             api_key=key, session_id=f"{session}-{uuid.uuid4().hex[:8]}",
-            system_message="You are a world-class cinematic artist creating viral mythological video visuals.",
+            system_message="You are a world-class Indian miniature-painting artist. Treat the supplied reference image and continuity bible as immutable identity and style constraints across a video series.",
         ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
         if ref_image and Path(ref_image).exists():
             b64 = base64.b64encode(Path(ref_image).read_bytes()).decode()
-            msg = UserMessage(text=prompt[:2200], file_contents=[ImageContent(b64)])
+            msg = UserMessage(text=prompt[:10000], file_contents=[ImageContent(b64)])
         else:
-            msg = UserMessage(text=prompt[:2200])
+            msg = UserMessage(text=prompt[:10000])
         _, images = await chat.send_message_multimodal_response(msg)
         if not images:
             raise RuntimeError("no images")

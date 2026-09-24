@@ -99,6 +99,7 @@ class Story(BaseDocument):
     metadata: Dict[str, Any] = {}
     media: Dict[str, Any] = {}
     review_notes: str = ""
+    edit_requests: List[Dict[str, Any]] = []
     publish: Dict[str, Any] = {}
     improvements: List[Dict[str, Any]] = []
     source_url: str = ""

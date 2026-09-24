@@ -109,10 +109,10 @@ def _slice(poster: Path, rows, cols, n, out_dir: Path):
     return tiles
 
 
-async def generate_storyboard(segments, out_dir: Path, style: str, channel: dict):
+async def generate_storyboard(segments, out_dir: Path, style: str, anchor: str, ref_image: Path, channel: dict):
     """One AI call for the whole poster (or a local PIL poster when every image API is dead),
     then local slicing into per-segment slides named 00.png, 01.png, …"""
-    from services import media
+    from services import router
 
     n = len(segments)
     rows, cols = _grid_for(n)
@@ -131,32 +131,28 @@ async def generate_storyboard(segments, out_dir: Path, style: str, channel: dict
         titles.append(t[:260] or "slide")
 
     prompt = (
-        f"One cohesive vertical infographic poster divided into a {rows}-row x {cols}-column grid of equal "
-        f"panels separated by thin white gutters. Art style: {style}. Poster title band at the bottom: "
-        f"'{(channel or {}).get('name', 'StoryForge')} — illustrated guide'. "
+        f"STRICT CHARACTER, SETTING AND STYLE CONTINUITY BIBLE — obey in every panel: {anchor} "
+        f"Create one cohesive vertical contact sheet divided into a {rows}-row x {cols}-column grid of equal narrative panels, "
+        f"separated only by delicate ornamental gold borders. ART DIRECTION LOCK: {style}. "
+        "Every reappearing character must have the exact same face, age, skin tone, hair, clothing colors, accessories, build and aura in every panel. "
+        "Recurring locations must keep the same architecture and props. Use a unified deep-indigo and saffron palette, fine miniature-painting linework, "
+        "rich natural pigments, subtle gold leaf, layered flat perspective, devotional atmosphere and cinematic lighting where requested. "
         + " ".join(
-            f"Panel {i + 1} (numbered badge top-left, row-major order): photorealistic illustration for "
-            f"headline '{t.split('. ')[0][:80]}' with supporting text '{('. '.join(t.split('. ')[1:]) or t)[:150]}'."
+            f"Panel {i + 1}, row-major scene: {t[:360]}."
             for i, t in enumerate(titles[: rows * cols]))
-        + " Bold readable English text inside every panel, high contrast, no watermark."
+        + " No captions, no title band, no letters, no numbered badges, no watermark, no photorealism, no 3D render, no style drift."
     )
 
     tmp = out_dir / "poster_ai.png"
-    ok = False
     try:
-        ok = await media.generate_image(prompt[:3500], tmp, session="storyboard")
+        await router.image(prompt[:10000], tmp, ref_image=ref_image, session="storyboard",
+                           require_reference=True, quality_required=True)
     except Exception as e:
-        print(f"[storyboard] AI poster failed: {str(e)[:140]}", flush=True)
-    if ok and tmp.exists():
+        raise RuntimeError(f"continuity-locked storyboard generation failed; retry when a reference-aware provider is available: {str(e)[:180]}") from e
+    if tmp.exists():
         tmp.replace(poster)
         print("[storyboard] AI poster generated (1 API call)", flush=True)
     else:
-        # free Pexels photos composited per panel (real photography, no AI cost)
-        from services import pexels
-        photos = await pexels.fetch_photos_for_panels(
-            [f"{t[:80]} india" for t in titles[: rows * cols]], out_dir)
-        print("[storyboard] PIL poster with "
-              f"{sum(1 for p in photos if p)} pexels photos", flush=True)
-        _pil_poster(titles, poster, rows, cols, photos)
+        raise RuntimeError("continuity-locked storyboard provider returned no image")
 
     return _slice(poster, rows, cols, n, out_dir)

@@ -106,7 +106,7 @@ async def optional_user_id(request: "Request") -> str:
 async def me(request: Request):
     token = _token_from(request)
     if not token:
-        raise HTTPException(401, "not signed in")
+        return Response(status_code=204)
     sess = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
     if not sess or _utc(sess.get("expires_at")) < datetime.now(timezone.utc):
         raise HTTPException(401, "session expired — sign in again")

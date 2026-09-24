@@ -168,10 +168,12 @@ def ffprobe_duration(path: Path) -> float:
         return 10.0
 
 
-async def generate_image(prompt: str, out_path: Path, ref_image: Path = None, session: str = "img"):
+async def generate_image(prompt: str, out_path: Path, ref_image: Path = None, session: str = "img",
+                         require_reference: bool = False):
     """Delegates to the provider chain in imagegen. Returns True if an AI image was generated."""
     from services.imagegen import generate_image as _gen
-    return await _gen(prompt, out_path, ref_image=ref_image, session=session)
+    return await _gen(prompt, out_path, ref_image=ref_image, session=session,
+                      require_reference=require_reference)
 
 
 def render_caption(text: str, out_png: Path, width: int = 1080, size: int = 52):

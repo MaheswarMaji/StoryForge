@@ -159,7 +159,7 @@ async def produce(story_id: str):
 async def stop_story(story_id: str):
     """Cancel the running/queued produce (or improve) job for this story."""
     j = await db.jobs.find_one(
-        {"ref_id": story_id, "type": {"$in": ["produce", "improve", "segment_fix"]},
+        {"ref_id": story_id, "type": {"$in": ["produce", "improve", "segment_fix", "edit_request"]},
          "status": {"$in": ["queued", "running"]}},
         sort=[("created_at", -1)])
     if not j:
@@ -230,12 +230,23 @@ async def put_scheduler(body: SchedulerBody):
     return await get_scheduler()
 
 
+class SegmentRegenerateBody(BaseModel):
+    kind: str = "all"  # script | voice | visual | all
+
+
 @router.post("/stories/{story_id}/segments/{index}/regenerate")
-async def regen_segment(story_id: str, index: int):
+async def regen_segment(story_id: str, index: int, body: Optional[SegmentRegenerateBody] = None):
     s = await db.stories.find_one({"_id": story_id})
     if not s:
         raise HTTPException(404, "story not found")
-    job_id = await enqueue("segment_fix", story_id, f"Regen segment {index + 1}", payload={"index": index})
+    chunks = (s.get("script") or {}).get("chunks") or []
+    if index < 0 or index >= len(chunks):
+        raise HTTPException(400, "invalid segment index")
+    kind = (body.kind if body else "all").strip().lower()
+    if kind not in {"script", "voice", "visual", "all"}:
+        raise HTTPException(400, "kind must be script|voice|visual|all")
+    job_id = await enqueue("segment_fix", story_id, f"Regenerate {kind} · segment {index + 1}",
+                           payload={"index": index, "kind": kind})
     return {"job_id": job_id}
 
 
@@ -338,7 +349,10 @@ async def patch_script(story_id: str, body: ScriptPatchBody):
         (MEDIA_ROOT / "clips" / story_id / f"{i:02d}.mp4").unlink(missing_ok=True)
     s["script"]["chunks"] = chunks
     await db.stories.update_one({"_id": story_id}, {"$set": {
-        "script": s["script"], "stage": "Script edited", "updated_at": utcnow()}})
+        "script": s["script"],
+        "status": "edits_requested" if changed else s.get("status", "script_ready"),
+        "stage": "Edits saved — ready to re-render" if changed else s.get("stage", "Script ready"),
+        "updated_at": utcnow()}})
     return {"ok": True, "edited": sorted(changed)}
 
 
@@ -371,6 +385,38 @@ async def story_config(story_id: str, body: ConfigBody):
     return {"ok": True, **patch}
 
 
+class CharacterSheetBody(BaseModel):
+    anchor: str
+
+
+@router.patch("/stories/{story_id}/character-sheet")
+async def update_character_sheet(story_id: str, body: CharacterSheetBody):
+    story = await db.stories.find_one({"_id": story_id})
+    if not story:
+        raise HTTPException(404, "story not found")
+    if story.get("status") == "rendering":
+        raise HTTPException(409, "pipeline busy — wait for the render to finish")
+    anchor = body.anchor.strip()
+    if len(anchor) < 80:
+        raise HTTPException(400, "consistency sheet must be at least 80 characters")
+    anchor = anchor[:12000]
+
+    script = story.get("script") or {}
+    script_sheet = script.get("character_sheet") or {}
+    script["character_sheet"] = {**script_sheet, "anchor": anchor}
+    version = int((story.get("character_sheet") or {}).get("version") or 0) + 1
+    sheet = {"anchor": anchor, "text": anchor, "locked": True, "visuals_stale": True, "version": version,
+             "updated_at": utcnow().isoformat()}
+    await db.stories.update_one({"_id": story_id}, {"$set": {
+        "character_sheet": sheet,
+        "script": script,
+        "status": "edits_requested",
+        "stage": "Consistency sheet saved — all visuals will regenerate",
+        "updated_at": utcnow(),
+    }})
+    return {"ok": True, "character_sheet": sheet, "invalidated": ["character_reference", "frames", "clips"]}
+
+
 class ReviewBody(BaseModel):
     action: str  # approve | reject | request_edits
     notes: str = ""
@@ -384,13 +430,22 @@ async def review(story_id: str, body: ReviewBody):
     mapping = {"approve": "approved", "reject": "rejected", "request_edits": "edits_requested"}
     if body.action not in mapping:
         raise HTTPException(400, "action must be approve|reject|request_edits")
+    if body.action == "request_edits" and not body.notes.strip():
+        raise HTTPException(400, "edit notes are required")
+    stage = {"approve": "Ready for upload", "reject": "Rejected",
+             "request_edits": "Edit request queued"}[body.action]
     await db.stories.update_one(
         {"_id": story_id},
         {"$set": {"status": mapping[body.action], "review_notes": body.notes,
-                  "stage": {"approve": "Ready for upload", "reject": "Rejected",
-                            "request_edits": "Edits requested"}[body.action],
-                  "updated_at": utcnow()}})
-    return await get_story(story_id)
+                  "stage": stage, "updated_at": utcnow()}})
+    job_id = None
+    if body.action == "request_edits":
+        job_id = await enqueue("edit_request", story_id, "Apply requested story edits",
+                               payload={"notes": body.notes.strip()})
+    response = await get_story(story_id)
+    if isinstance(response, dict):
+        response["edit_job_id"] = job_id
+    return response
 
 
 # ---------- jobs & dashboard ----------

@@ -1,0 +1,88 @@
+{
+  "summary": "6 acceptance criteria exercised across 4 backend test files (8 pytest tests) + 4 named browser checks against the public ingress (tale-craft-122.preview.emergentagent.com). All passed. Segment editing, per-segment Script/Voice/Image regenerate dispatch, Request Edits notes-required flow, signed-out console/network cleanliness, and public ingress serving were all verified against the seeded story feature-segment-controls. Pre-existing full backend suite (iteration 4-9 files) has 22 unrelated failures from expired/invalid third-party API keys (HF 401, Gemini 400, Stability, missing REACT_APP_BACKEND_URL in old scripts) -- out of scope for this briefing's acceptance matrix and not touched.",
+  "passed": 8,
+  "failed": 0,
+  "checks": [
+    {
+      "criterion": "A user can edit each segment's narration script, visual summary, and image/video prompt",
+      "name": "segment-edit-script-persists",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Review & Edit Script opened per-segment textareas (voiceover/visual/video_prompt); filled marker text, clicked Save Changes; GET /api/stories/feature-segment-controls confirmed the marker persisted in script.chunks and status flipped to edits_requested."
+    },
+    {
+      "criterion": "Each segment has separate script, voice, and image/video regeneration options",
+      "name": "segment-regenerate-buttons-dispatch",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Clicked regenerate-segment-script-button-0, regenerate-segment-voice-button-0, regenerate-segment-visual-button-1; captured POST bodies to /api/stories/feature-segment-controls/segments/{0,0,1}/regenerate with kind script/voice/visual respectively."
+    },
+    {
+      "criterion": "Segment regeneration API validates requests and queues the selected operation",
+      "name": "test_tscheck_segment_regenerate.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "POST /segments/0/regenerate kind=script|voice|visual (after clearing dedupe) -> 200 {job_id: <id>} each. kind='not-a-real-kind' -> 400 {detail:'kind must be script|voice|visual|all'}. index=99 -> 400 'invalid segment index'. 3 tests passed."
+    },
+    {
+      "criterion": "Request Edits is operational and requires notes",
+      "name": "request-edits-requires-notes",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Opened Request Edits dialog; submit button disabled with blank notes; filled tscheck marker, submit enabled; POST /api/stories/feature-segment-controls/review returned 200 with review_notes=marker, status=edits_requested, edit_job_id set; dialog closed, 'Edit request queued' toast shown, marker text visible on page."
+    },
+    {
+      "criterion": "Request Edits is operational and requires notes",
+      "name": "test_tscheck_review_request_edits.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "POST /review action=request_edits notes='   ' -> 400 {detail:'edit notes are required'}. Non-blank marker notes -> 200 with status=edits_requested, review_notes=marker, edit_job_id present; GET confirms persistence. 2 tests passed."
+    },
+    {
+      "criterion": "A user can edit each segment's narration script, visual summary, and image/video prompt",
+      "name": "test_tscheck_script_patch.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "PATCH /api/stories/feature-segment-controls/script {chunks:[{index:1, voiceover, visual, video_prompt: tscheck markers}]} -> 200 {edited:[1]}; GET round-trips the marker text and status=edits_requested. Original chunk[1] values restored in a finally block to keep the shared fixture stable."
+    },
+    {
+      "criterion": "Signed-out story-detail use is free of console/network errors",
+      "name": "signed-out-story-detail-no-errors",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Navigated signed-out to /stories/feature-segment-controls via public ingress; title and Script Segments rendered; zero >=400 /api/ responses captured; strict_console=true raised no failures; GET /api/auth/me -> 204."
+    },
+    {
+      "criterion": "Signed-out story-detail use is free of console/network errors",
+      "name": "test_tscheck_auth_me_and_root.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "GET /api/auth/me (no session) -> 204. GET /api/ -> 200 {message:'StoryForge API is running'}."
+    },
+    {
+      "criterion": "Public ingress serves the updated app and API",
+      "name": "signed-out-story-detail-no-errors (ingress cross-check)",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Covered by the same check above, run against https://tale-craft-122.preview.emergentagent.com; curl to https://tale-craft-122.preview.emergentagent.com/api/ independently returned {message:'StoryForge API is running'}."
+    }
+  ],
+  "bugs": [],
+  "action_items": [
+    "Note: job_queue.enqueue() dedupes by (type, ref_id) only, not (type, ref_id, index, kind) or (type, ref_id, notes) — a queued segment_fix or edit_request job for a story silently no-ops (job_id: null) further regenerate/request_edits calls for that story until the existing job drains or is cancelled. Not a bug against this briefing's acceptance criteria (which explicitly says 'when no duplicate job is active'), but worth the main agent's awareness since the paused queue in this env means any leftover queued job masks subsequent calls with a silent null job_id rather than a 409.",
+    "Pre-existing (not from this session): full backend suite has 22 failures in tests/test_iteration{4,5,6,7,9}*.py from expired/misconfigured third-party keys (HF 401, Gemini 400, Stability, missing REACT_APP_BACKEND_URL env in old test files) — unrelated to this briefing's matrix, left untouched per scope."
+  ],
+  "retest_needed": false,
+  "test_report_links": [
+    "/app/backend/tests/test_tscheck_segment_regenerate.py",
+    "/app/backend/tests/test_tscheck_review_request_edits.py",
+    "/app/backend/tests/test_tscheck_script_patch.py",
+    "/app/backend/tests/test_tscheck_auth_me_and_root.py",
+    "/app/.emergent/scripts/checks/segment-edit-script-persists.mjs",
+    "/app/.emergent/scripts/checks/segment-regenerate-buttons-dispatch.mjs",
+    "/app/.emergent/scripts/checks/request-edits-requires-notes.mjs",
+    "/app/.emergent/scripts/checks/signed-out-story-detail-no-errors.mjs"
+  ],
+  "success_rate": {"backend": "8/8 (new tscheck tests)", "browser": "4/4 named checks"},
+  "main_agent_can_self_test": true
+}
