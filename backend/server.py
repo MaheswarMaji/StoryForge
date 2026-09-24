@@ -44,7 +44,7 @@ CHANNEL_SEEDS = [
         "key": "mythology", "name": "Mythic Shorts — Dramatic",
         "description": "Puranas, Bhagwat, Ramayana & Mahabharata retellings. Warm authoritative male narration, devotional-to-epic music.",
         "language": "hi", "tone": "Warm, authoritative, dramatic storytelling with dramatic pauses",
-        "voice": "gemini:Charon", "voice_speed": 0.95, "music_mood": "devotional", "music_volume": 0.16,
+        "voice": "kokoro:hm_omega", "voice_speed": 0.95, "music_mood": "devotional", "music_volume": 0.16,
         "safety_level": "general", "is_kids": False,
         "style_prefix": "Indian miniature painting style with gold leaf details, deep indigo and saffron palette, cinematic 4K, dramatic temple lighting",
         "cta_text": "Follow for more legendary tales from the Puranas",
@@ -53,7 +53,7 @@ CHANNEL_SEEDS = [
         "key": "folk_ghost", "name": "Folk Tales — Whimsical",
         "description": "Thakurmar Jhuli & Bengali/Indian folk and ghost lore for kids. Playful narrator, gentle spooks, kind morals.",
         "language": "bn", "tone": "Friendly, playful, animated grandmother-style narration for kids",
-        "voice": "gemini:Kore", "voice_speed": 1.0, "music_mood": "moral", "music_volume": 0.14,
+        "voice": "local:auto", "voice_speed": 1.0, "music_mood": "moral", "music_volume": 0.14,
         "safety_level": "strict_kids", "is_kids": True,
         "style_prefix": "Whimsical storybook illustration, soft pastel palette with glowing lanterns, rounded friendly shapes, gentle magical night atmosphere",
         "cta_text": "Subscribe for more bedtime folk tales",
@@ -62,7 +62,7 @@ CHANNEL_SEEDS = [
         "key": "public_interest", "name": "Public Interest — News Explained",
         "description": "Daily factual Shorts on climate, disasters, science & tech, institutional reports, economy and public health. Every video passes an independent policy agent + human review before publishing.",
         "language": "en", "tone": "Crisp, factual, engaging news-explainer — neutral and authoritative",
-        "voice": "gemini:Charon", "voice_speed": 1.05, "music_mood": "suspense", "music_volume": 0.10,
+        "voice": "kokoro:am_adam", "voice_speed": 1.05, "music_mood": "suspense", "music_volume": 0.10,
         "safety_level": "news", "is_kids": False,
         "style_prefix": "Clean broadcast news style, modern flat infographic aesthetic, deep navy and white with a single accent color, professional studio lighting",
         "cta_text": "Follow for daily public-interest briefings",
@@ -82,9 +82,6 @@ async def seed_channels():
                 doc["_id"] = str(existing["_id"])
                 await db.channels.delete_one({"key": seed["key"]})
                 await db.channels.insert_one(doc)
-            # migrate legacy openai voice names to gemini voices
-            if existing.get("voice") in ("onyx", "fable"):
-                await db.channels.update_one({"key": seed["key"]}, {"$set": {"voice": seed["voice"]}})
 
 
 @app.on_event("startup")
@@ -93,6 +90,8 @@ async def startup():
     await _load_social_settings()
     await _load_key_vault()
     await _seed_video_type_channels()
+    from services.tts_defaults import migrate_channel_defaults
+    await migrate_channel_defaults(db)
     tasks_mod.register_all()
     asyncio.create_task(_delayed_workers())
 

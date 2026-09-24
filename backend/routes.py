@@ -900,7 +900,7 @@ PREVIEW_LINES = {"hi": "नमस्कार! यह आवाज़ आपक�
 
 
 class VoicePreviewBody(BaseModel):
-    voice: str = ""
+    voice: str = "local:auto"
     language: str = "hi"
     tone: str = ""
 
@@ -914,7 +914,8 @@ async def tts_preview(body: VoicePreviewBody):
 
     lang = (body.language or "hi").split("-")[0]
     text = PREVIEW_LINES.get(lang, PREVIEW_LINES["en"])
-    key = hashlib.sha1(f"{body.voice}|{lang}|{body.tone}".encode()).hexdigest()[:12]
+    # Do not reuse samples produced by the old implicit Gemini-expressive path.
+    key = hashlib.sha1(f"local-tts-v1|{body.voice}|{lang}|{body.tone}".encode()).hexdigest()[:12]
     out = MEDIA_ROOT / "tmp" / f"voice-preview-{key}.mp3"
     lock = _PREVIEW_LOCKS.setdefault(key, asyncio.Lock())
     if not out.exists() or out.stat().st_size == 0:

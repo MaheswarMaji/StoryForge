@@ -36,7 +36,7 @@ class Channel(BaseDocument):
     description: str = ""
     language: str = "hi"
     tone: str = ""
-    voice: str = "onyx"
+    voice: str = "local:auto"
     voice_speed: float = 1.0
     music_mood: str = "devotional"
     music_volume: float = 0.16

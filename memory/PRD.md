@@ -51,6 +51,7 @@ Later additions: bulk story extraction with curation; direct YouTube/Instagram p
 - Provider billing states (not code bugs): fal.ai LOCKED (exhausted balance), Emergent universal key budget exceeded, OpenAI unfunded, Gemini IMAGE quota exhausted on free tier (TEXT works). Real AI images NOW WORK via Stability (funded); Pexels provides free real photography as backup.
 
 ## Backlog / Next
+- Narration routing updated to local-first Kokoro → XTTS → gTTS. All existing cloud/default channel voices migrated once; Gemini now requires explicit gemini: selection and expressive narration never enables it implicitly. Preview defaults/cache and Channels voice choices updated. Existing rendered narration is not automatically regenerated. See SPEC.md for language and gTTS network limitations.
 - Latest: selectable image/video defaults and story/segment overrides, diagnostic events, vault precedence fix, and configurable Studio adapter added. Direct Gemini probe still returns Google free-tier image quota limit 0; project billing required. Studio API installation/credentials and live end-to-end verification are pending; see SPEC.md and STUDIO_API.md. Older provider/fallback notes above are historical, not current routing policy.
 - P1: Complete Instagram Graph API publishing (upload logic) — UI + OAuth-style settings exist, needs live Facebook app credentials
 - P1: Comment Engagement Agent — wire draft-only agent to live YouTube/Instagram comment feeds

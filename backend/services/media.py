@@ -71,7 +71,7 @@ OPENAI_VOICES = {"alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage
 async def synthesize_voice(text: str, voice: str, speed: float, out_path: Path,
                            lang_hint: str = None, direction: str = None,
                            expressive: bool = False) -> float:
-    """Routes TTS through the provider chain (quota APIs first, open-source fallbacks)."""
+    """Local-first TTS; Gemini is permitted only by an explicit gemini: voice."""
     from services import router
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

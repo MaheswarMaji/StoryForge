@@ -46,9 +46,18 @@ export const PIPELINE_STEPS = [
 ];
 
 export const TTS_VOICES = [
+  "local:auto", "kokoro:hf_alpha", "kokoro:hf_beta", "kokoro:hm_omega", "kokoro:hm_psi",
+  "kokoro:af_heart", "kokoro:af_bella", "kokoro:af_nicole", "kokoro:af_sky",
+  "kokoro:am_adam", "kokoro:am_michael", "kokoro:am_echo", "xtts:default", "gtts:default",
   "gemini:Charon", "gemini:Kore", "gemini:Puck", "gemini:Leda", "gemini:Aoede",
   "gemini:Fenrir", "gemini:Zephyr", "onyx", "coral", "fable", "nova", "ash", "sage", "shimmer", "alloy", "echo",
 ];
+export const ttsVoiceLabel = (voice) => voice === 'local:auto'
+  ? 'Local automatic · Kokoro → XTTS → gTTS'
+  : voice.startsWith('gemini:') ? `${voice} · cloud, explicit opt-in`
+  : voice === 'xtts:default' ? 'XTTS · local (gTTS fallback)'
+  : voice === 'gtts:default' ? 'gTTS · online, no Gemini'
+  : voice;
 export const MUSIC_MOODS = ["devotional", "suspense", "horror", "moral", "action", "sad", "happy"];
 export const LANGS = [
   { value: "hi", label: "Hindi / Devanagari" },

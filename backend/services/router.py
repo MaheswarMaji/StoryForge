@@ -36,8 +36,10 @@ def _key(name: str) -> str:
 
 
 def chain(kind: str) -> list:
+    if kind == 'tts':
+        from services.tts_defaults import LOCAL_TTS_CHAIN
+        return list(LOCAL_TTS_CHAIN)
     order = {
-        "tts": os.environ.get("TTS_PROVIDER_ORDER", "gemini_expr,kokoro,xtts,gtts,gemini,openai"),
         "image": os.environ.get("IMAGE_PROVIDER_ORDER",
                                 "openai,stability,hf_flux,fal_flux,replicate_flux,emergent,gemini,qwen_local,pexels,procedural"),
         "video": os.environ.get("VIDEO_PROVIDER_ORDER", "gemini_veo,replicate_wan,fal_wan,pexels_video,kenburns"),
@@ -58,7 +60,6 @@ def status() -> dict:
             "hf_flux": {"key": bool(_key("HF_TOKEN")), "healthy": available("hf_flux")},
             "stability": {"key": bool(_key("STABILITY_API_KEY")), "healthy": available("stability")},
             "gemini": {"key": bool(_key("GEMINI_API_KEY")), "healthy": available("gemini")},
-            "gemini_expr": {"key": bool(_key("GEMINI_API_KEY")), "healthy": available("gemini_expr")},
             "openai": {"key": bool(_key("OPENAI_API_KEY")), "healthy": available("openai")},
             "kokoro": {"key": True, "healthy": available("kokoro")},
             "xtts": {"key": True, "healthy": available("xtts")},
@@ -69,7 +70,7 @@ def status() -> dict:
             "pexels": {"key": bool(_key("PEXELS_API_KEY")), "healthy": True},
             "pexels_video": {"key": bool(_key("PEXELS_API_KEY")), "healthy": True},
         },
-        "notes": "Media Engines controls image/video defaults and story overrides. Only Auto permits fallback. Reference-incompatible engines are blocked for locked frames. A configured key does not guarantee quota. Ken Burns is local motion, not generative video.",
+        "notes": "Narration defaults to Kokoro → XTTS → gTTS. Gemini TTS runs only when a gemini: voice is explicitly selected in Channels. Expressive narration does not enable cloud TTS. gTTS requires internet, but not Gemini. Media Engines controls images/video independently; Ken Burns is local motion, not generative video.",
     }
 
 
@@ -83,19 +84,13 @@ _xtts_model = None
 _pipes = {}
 
 
-GEMINI_VOICE_FOR = {
-    "hf_alpha": "Aoede", "hf_beta": "Leda", "af_heart": "Kore", "af_bella": "Kore",
-    "af_nicole": "Aoede", "af_sky": "Aoede", "am_adam": "Charon", "am_michael": "Charon",
-    "am_echo": "Fenrir", "hm_omega": "Charon", "hm_psi": "Puck", "onyx": "Charon",
-    "nova": "Puck", "coral": "Aoede", "fable": "Leda", "sage": "Charon", "echo": "Charon",
-    "alloy": "Aoede", "ash": "Fenrir", "shimmer": "Aoede",
-}
 HUMANIZE_PROVIDERS = {"kokoro", "xtts", "gtts", "openai"}
 
 
 async def tts(text: str, voice_spec: str, lang_hint: str, out_path: Path,
               direction: str = None, expressive: bool = False, speed: float = 1.0) -> dict:
     from services import gemini, generation
+    from services.tts_defaults import narration_chain
     from services.media import ffprobe_duration, humanize_audio
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -108,24 +103,15 @@ async def tts(text: str, voice_spec: str, lang_hint: str, out_path: Path,
         return {"provider": provider, "duration": dur}
 
     errors = []
-    for provider in chain("tts"):
+    for provider in narration_chain(voice_spec):
         if not available(provider):
             continue
         try:
-            if provider == "gemini_expr":
-                if not expressive or not gemini.gemini_key():
-                    raise RuntimeError("gemini_expr not applicable")
-                spec = (voice_spec or "").split(":", 1)[-1] if ":" in (voice_spec or "") else (voice_spec or "")
-                gv = GEMINI_VOICE_FOR.get((spec or "").lower(), "Aoede")
-                dur = await gemini.tts(text, gv, out_path, direction=direction)
-                _ok(provider)
-                return {"provider": provider, "duration": dur}
-
             if provider == "gemini":
                 if not (voice_spec or "").startswith("gemini:") or not gemini.gemini_key():
                     raise RuntimeError("gemini tts not applicable")
                 dur = await gemini.tts(text, voice_spec.split(":", 1)[1] or "Kore", out_path,
-                                       direction=direction)
+                                       direction=direction if expressive else None)
                 _ok(provider)
                 return {"provider": provider, "duration": dur}
 
@@ -153,7 +139,7 @@ async def tts(text: str, voice_spec: str, lang_hint: str, out_path: Path,
 
             if provider == "openai":
                 from services.media import openai_tts
-                dur = await openai_tts(text, voice_spec, out_path)
+                dur = await openai_tts(text, voice_spec.removeprefix('openai:'), out_path)
                 _ok(provider)
                 return await finish(provider, dur)
         except Exception as e:

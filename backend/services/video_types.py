@@ -12,7 +12,7 @@ VIDEO_TYPES = {
     "folk_horror": {
         "name": "Regional Folk & Horror-Mystery", "audience": "Youth", "language": "bn",
         "tone": "Suspenseful, eerie but engaging narrator for young adults",
-        "voice": "kokoro:hf_beta", "music_mood": "horror", "music_volume": 0.15,
+        "voice": "local:auto", "music_mood": "horror", "music_volume": 0.15,
         "safety_level": "general", "is_kids": False,
         "style_prefix": "Dark folk art with misty village atmosphere, deep greens and charcoal palette, moonlit cinematic lighting",
         "cta_text": "Follow for more folk mysteries",

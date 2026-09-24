@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Play, Save, Shield, Square, Volume2, Music } from "lucide-react";
 import { api, MEDIA, useChannels } from "@/lib/api";
-import { TTS_VOICES, MUSIC_MOODS, LANGS } from "@/lib/ui";
+import { TTS_VOICES, ttsVoiceLabel, MUSIC_MOODS, LANGS } from "@/lib/ui";
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,7 @@ import { toast } from "sonner";
 
 export default function ChannelsPage() {
   const { channels } = useChannels();
+  const queryClient = useQueryClient();
   const [state, setState] = useState({});
   const [saving, setSaving] = useState(null);
   const audioRef = useRef(null);
@@ -60,6 +62,7 @@ export default function ChannelsPage() {
         style_prefix: c.style_prefix, cta_text: c.cta_text, is_kids: !!c.is_kids,
         expressive_voice: c.expressive_voice !== false,
       });
+      await queryClient.invalidateQueries({ queryKey: ['channels'] });
       toast.success(`${c.name} settings saved`);
     } catch (e) {
       toast.error("Save failed");
@@ -74,11 +77,12 @@ export default function ChannelsPage() {
     <div className="mx-auto max-w-5xl space-y-6">
       <div>
         <h1 className="font-display text-3xl font-extrabold tracking-tight text-slate-100 lg:text-4xl">Channels & Settings</h1>
-        <p className="mt-1 text-sm text-slate-400">Two independently configurable content channels sharing one pipeline — tone, voice, music and safety are per-channel</p>
+        <p data-testid="channel-narration-default-policy" className="mt-1 text-sm text-slate-400">Local narration by default: Kokoro → XTTS → gTTS. Gemini runs only when you explicitly select a Gemini voice.</p>
+        <p data-testid="channel-local-tts-language-note" className="mt-2 text-xs text-slate-500">Unsupported languages skip to the next engine. Bengali currently uses gTTS, which requires internet but no Gemini key. Existing story audio stays unchanged until regenerated.</p>
       </div>
 
       <Tabs defaultValue={Object.keys(state)[0]}>
-        <TabsList className="border border-amber-500/20 bg-[#12141F]">
+        <TabsList className="h-auto w-full flex-wrap justify-start gap-1 border border-amber-500/20 bg-[#12141F]">
           {Object.values(state).map((c) => (
             <TabsTrigger key={c.id} data-testid={`channel-tab-${c.key}`} value={c.id} className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">
               {c.name}
@@ -109,7 +113,7 @@ export default function ChannelsPage() {
                     <Select value={c.voice} onValueChange={(v) => set(c.id, "voice", v)}>
                       <SelectTrigger data-testid="channel-voice-select" className="mt-1.5 border-white/10 bg-black/30 text-slate-200"><SelectValue /></SelectTrigger>
                       <SelectContent className="border-amber-500/20 bg-[#12141F]">
-                        {TTS_VOICES.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                        {TTS_VOICES.map((v) => <SelectItem data-testid={`channel-voice-option-${v.replaceAll(':', '-').replaceAll('_', '-')}`} key={v} value={v}>{ttsVoiceLabel(v)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     <Button variant="outline" size="sm" data-testid={`channel-voice-preview-${c.id}`}
@@ -127,7 +131,7 @@ export default function ChannelsPage() {
                   </div>
                   <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-2.5 md:col-span-2">
                     <Switch data-testid="channel-expressive-switch" checked={c.expressive_voice !== false} onCheckedChange={(v) => set(c.id, "expressive_voice", v)} />
-                    <span className="text-sm text-slate-300">Expressive narration — emotional pacing, dramatic pauses &amp; voice dynamics (falls back to the standard voice when quota runs out)</span>
+                    <span data-testid="channel-expressive-local-policy" className="text-sm text-slate-300">Expressive narration — emotional pacing and voice dynamics on the selected engine. This switch does not enable Gemini.</span>
                   </div>
                 </div>
               </div>
