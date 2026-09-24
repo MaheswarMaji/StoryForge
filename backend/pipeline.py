@@ -326,8 +326,13 @@ async def produce_video(story_id: str, setp, job_id=""):
             shutil.rmtree(MEDIA_ROOT / sub / story_id, ignore_errors=True)
 
     await set_story(status="rendering", stage="Fact check & edit")
-    await setp(2, "Fact check & editor pass")
-    chunks, editor = await _editor_pass(story_id, story, channel, set_story)
+    if (story.get("script") or {}).get("imported_verbatim"):
+        editor = (story.get("script") or {}).get("editor") or {}
+        await setp(2, "Using supplied dialogue and visuals verbatim")
+        await set_story(stage="Supplied script locked")
+    else:
+        await setp(2, "Fact check & editor pass")
+        chunks, editor = await _editor_pass(story_id, story, channel, set_story)
     chunks = chunks[:24]
 
     await set_story(status="rendering", stage="Character sheet", error="")

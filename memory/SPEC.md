@@ -14,6 +14,7 @@ StoryForge is an AI-powered mythology and folk-story video factory imported from
 - The Character & Style Consistency Sheet is editable and becomes a locked canonical continuity bible. Saving it preserves narration audio, marks all character references/frames/clips stale, and forces visual regeneration on the next render.
 - Every visual prompt receives the full, untruncated continuity bible before the scene prompt. Storyboard mode uses one cohesive contact sheet with the same reference image; slide frames require a reference-aware provider; clip mode animates the approved frame locally rather than allowing text-to-video identity drift.
 - Quality policy: the pipeline fails with a retryable error when reference-aware image generation is unavailable instead of silently substituting Pexels/procedural imagery that breaks character or illustration-style continuity.
+- Create from Script detects numbered Hindi or English scene blocks. Supplied Visual and Narration/Voiceover/Dialogue content is parsed deterministically into matching segments and preserved verbatim; its Consistency Bible becomes the locked character sheet. No script-generation job is created for structured input. Unstructured prompts retain the existing AI script fallback.
 - Emergent-managed Google OAuth session flow under `/api/auth/*`.
 
 ## Verification state

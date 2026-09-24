@@ -50,7 +50,9 @@ function ScriptCreator({ title, types, vtype, setVtype, busy, setBusy }) {
       const { data } = await api.post("/stories/create", {
         title, source_text: source, video_type: vtype, length_seconds: length, mode,
       });
-      toast.success("Script is being written — review it in the Story Studio before rendering");
+      toast.success(data.imported
+        ? `${data.imported_segments} supplied scenes loaded exactly — no dialogue or visual regeneration`
+        : "No structured scenes found, so the script is being written from your prompt");
       navigate(`/stories/${data.story_id}`);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Create failed");
@@ -62,9 +64,9 @@ function ScriptCreator({ title, types, vtype, setVtype, busy, setBusy }) {
   return (
     <>
       <div>
-        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">Script or prompt *</label>
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">Script, dialogue &amp; visuals — or a prompt *</label>
         <Textarea data-testid="create-script-textarea" value={source} onChange={(e) => setSource(e.target.value)} rows={8}
-          placeholder={"Paste your full script here…\n\n—or—\n\nJust describe the video: \"A 90-second Hindi short about a poor farmer in Vidarbha whose honesty is rewarded during a drought, ending with a life lesson about integrity.\""}
+          placeholder={"Paste a scene-by-scene script with labels such as:\nसीन 1 | 0:00–0:08 (Hook)\nविज़ुअल: …\nनैरेशन (वॉयसओवर): \"…\"\n\nSupplied scenes are loaded verbatim. Plain prompts still use AI script generation."}
           className="border-white/10 bg-black/30 text-sm leading-relaxed text-slate-200" />
       </div>
 
@@ -105,10 +107,10 @@ function ScriptCreator({ title, types, vtype, setVtype, busy, setBusy }) {
 
       <Button data-testid="create-video-button" onClick={submit} disabled={busy} className="w-full bg-amber-500 py-3 font-semibold text-[#090A0F] hover:bg-amber-400">
         {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-        Write Script &amp; Open Story Studio
+        Load Script &amp; Open Story Studio
       </Button>
       <p className="text-[11px] leading-relaxed text-slate-500">
-        Next: review &amp; edit the script in the Story Studio → produce (slides or AI clips, expressive narration, music, captions) → approve → upload to YouTube.
+        Numbered scenes with Visual + Narration/Dialogue labels bypass AI writing and load directly into matching segments. Unstructured prompts still use AI generation.
       </p>
     </>
   );

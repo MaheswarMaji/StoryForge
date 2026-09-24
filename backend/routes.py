@@ -279,6 +279,7 @@ class CreateBody(BaseModel):
 
 @router.post("/stories/create")
 async def create_story(body: CreateBody):
+    from script_parser import parse_scene_script
     from services.video_types import VIDEO_TYPES
     cfg = VIDEO_TYPES.get(body.video_type)
     if not cfg:
@@ -299,17 +300,29 @@ async def create_story(body: CreateBody):
                          mode=mode, video_type=body.video_type)
         await db.channels.insert_one(ch_doc.to_mongo())
         ch = await db.channels.find_one({"key": key})
+    parsed = parse_scene_script(body.source_text)
+    supplied_title = body.title.strip() or ((parsed or {}).get("title") or "")
+    bible = ((parsed or {}).get("character_sheet") or "").strip()
     story = Story(book_id=f"prompt-{utcnow().strftime('%Y%m%d-%H%M%S')}", channel_id=ch["_id"],
-                  title_hindi=body.title.strip(), title_english=body.title.strip()[:100],
+                  title_hindi=supplied_title, title_english=supplied_title[:100],
                   source="Pasted script / prompt", category=cfg["name"],
                   target_seconds=target, mode=mode,
                   source_text=body.source_text.strip()[:20000],
                   emotional_tone=cfg["tone"][:60], target_audience=cfg["audience"],
                   visual_style=cfg["style_prefix"][:120], estimated_length=f"{target}s",
-                  status="draft")
+                  status="script_ready" if parsed else "draft",
+                  stage=f"Loaded {len(parsed['chunks'])} supplied scenes" if parsed else "",
+                  script={"chunks": parsed["chunks"], "production_notes": parsed["production_notes"],
+                          "imported_verbatim": True,
+                          "character_sheet": {"anchor": bible}} if parsed else {},
+                  character_sheet={"anchor": bible, "text": bible, "locked": bool(bible),
+                                   "visuals_stale": False, "version": 1} if parsed else {})
     await db.stories.insert_one(story.to_mongo())
-    job_id = await enqueue("script", story.id, f"Script: {body.title[:40] or story.id}")
-    return {"story_id": story.id, "job_id": job_id}
+    if parsed:
+        return {"story_id": story.id, "job_id": None, "imported": True,
+                "imported_segments": len(parsed["chunks"])}
+    job_id = await enqueue("script", story.id, f"Script: {supplied_title[:40] or story.id}")
+    return {"story_id": story.id, "job_id": job_id, "imported": False, "imported_segments": 0}
 
 
 @router.get("/video-types")

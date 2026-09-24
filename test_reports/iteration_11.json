@@ -1,0 +1,47 @@
+{
+  "summary": "New briefing: structured Hindi scene-script import (Create from Script -> Story Studio). 7 acceptance criteria covered by 1 backend test file (3 pytest tests) + 1 named browser check against the public ingress (tale-craft-122.preview.emergentagent.com), plus static code review of the production-pipeline skip branch. All checks passed.",
+  "passed": 4,
+  "failed": 0,
+  "checks": [
+    {
+      "criterion": "Create from Script detects the supplied Hindi scene format without invoking AI script generation",
+      "name": "test_tscheck_structured_script_import.py::test_structured_script_is_detected_and_imported_verbatim",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "POST /api/stories/create with a Consistency Bible + 3 numbered सीन blocks -> 200 {imported:true, imported_segments:3, job_id:null}. GET /api/stories/{id} -> status=script_ready, script.imported_verbatim=true, 3 chunks."
+    },
+    {
+      "criterion": "Supplied dialogue/narration preserved verbatim; supplied visuals preserved verbatim; Consistency Bible loaded as locked anchor; imported scripts unchanged by config changes",
+      "name": "test_tscheck_structured_script_import.py::test_structured_script_is_detected_and_imported_verbatim (same test, additional assertions)",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "chunks[0].voiceover contains both नैरेशन and संवाद tscheck-tagged text unrewritten; chunks[2].voiceover contains the नैरेशन+CTA quoted text with quotes stripped; visual==video_prompt for all 3 chunks and contain the tscheck विज़ुअल text verbatim. story.character_sheet.locked=true and anchor contains both tscheck-राजा/tscheck-रानी lines; script.character_sheet.anchor matches. PUT /api/stories/{id}/config {target_seconds:60} -> 200, target_seconds updated, but script.imported_verbatim still true and chunks[0].voiceover unchanged (no regeneration triggered)."
+    },
+    {
+      "criterion": "Malformed or unstructured input retains safe behavior",
+      "name": "test_tscheck_structured_script_import.py::test_blank_source_text_returns_400 and test_unstructured_input_falls_back_to_ai_script_generation",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "POST /api/stories/create source_text='   ' -> 400. POST with a plain English prompt (no सीन blocks) -> 200 {imported:false, imported_segments:0, job_id:<uuid>} i.e. falls back to the existing AI script-generation job path instead of being falsely marked imported."
+    },
+    {
+      "criterion": "Public Create-to-Studio flow is clean and usable",
+      "name": "create-from-script-structured-import",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Against https://tale-craft-122.preview.emergentagent.com/create: filled title + pasted the Hindi Consistency Bible + 3-scene script, clicked Create; POST /api/stories/create returned {imported:true, imported_segments:3, job_id:null}; navigated to Story Studio showing title, 'Loaded 3 supplied scenes' stage, toast '3 supplied scenes loaded exactly — no dialogue or visual regeneration', segment-voiceover-{0,1,2} showing the exact supplied नैरेशन/संवाद text, character-sheet-locked-badge visible with anchor containing the supplied character lines, and produce-video-cta visible (NOT clicked, per spec deviation, to avoid spending credits). Zero >=400 /api/ responses and zero page errors captured during the flow."
+    }
+  ],
+  "bugs": [],
+  "action_items": [
+    "Static verification only (per spec_deviations, Produce Video was not clicked to avoid spending image/TTS credits): pipeline.py line 329 confirms `if (story.get('script') or {}).get('imported_verbatim'): ... await setp(2, 'Using supplied dialogue and visuals verbatim')` skips the `_editor_pass` (AI script rewriter) entirely for imported stories, matching the acceptance criterion 'production pipeline code path skips the editor rewrite for imported scripts'. This is documented here rather than exercised end-to-end because actually running produce_video would incur real image/TTS provider costs, consistent with the briefing's explicit instruction.",
+    "Acceptance matrix had 7 criteria; two backend-only assertions (verbatim preservation of dialogue/visuals and Consistency Bible anchor + config-change immunity) were folded into the single comprehensive test_structured_script_is_detected_and_imported_verbatim test rather than split into separate test functions, since they all depend on the same created story and splitting would just re-run the same POST. All 7 criteria are exercised across the 4 checks[] entries above (backend test file covers 5 criteria across its 3 test functions; browser check covers the UI-usability criterion; the pipeline-skip criterion is covered by the static note above)."
+  ],
+  "retest_needed": false,
+  "test_report_links": [
+    "/app/backend/tests/test_tscheck_structured_script_import.py",
+    "/app/.emergent/scripts/checks/create-from-script-structured-import.mjs"
+  ],
+  "success_rate": {"backend": "3/3 new tscheck tests (pytest)", "browser": "1/1 named check"},
+  "main_agent_can_self_test": true
+}

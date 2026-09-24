@@ -135,10 +135,17 @@ function RenderConfig({ story, onSave }) {
         Length
         <select data-testid="length-select" value={story.target_seconds || 90} onChange={(e) => onSave({ target_seconds: Number(e.target.value) })}
           className="rounded-lg border border-white/15 bg-black/40 px-2 py-1.5 text-xs text-slate-200">
-          {[30, 45, 60, 90, 120, 150, 180, 240].map((s) => <option key={s} value={s}>{s} seconds</option>)}
+          <option value={30}>30 seconds</option>
+          <option value={45}>45 seconds</option>
+          <option value={60}>60 seconds</option>
+          <option value={90}>90 seconds</option>
+          <option value={120}>120 seconds</option>
+          <option value={150}>150 seconds</option>
+          <option value={180}>180 seconds</option>
+          <option value={240}>240 seconds</option>
         </select>
       </div>
-      <span className="text-[11px] text-slate-500">Changing the length rewrites the script — review it again before producing.</span>
+      <span className="text-[11px] text-slate-500">{story.script?.imported_verbatim ? "Imported dialogue and visuals stay unchanged when length changes." : "Changing the length rewrites the script — review it again before producing."}</span>
     </div>
   );
 }
@@ -471,8 +478,12 @@ export default function StoryDetailPage() {
   const saveConfig = (patch) => act(async () => {
     await api.put(`/stories/${id}/config`, patch);
     if (patch.target_seconds != null) {
-      await api.post(`/stories/${id}/script`);
-      toast.success("Length updated — the script is being rewritten; review it before producing");
+      if (story.script?.imported_verbatim) {
+        toast.success("Length updated — supplied dialogue and visuals were preserved exactly");
+      } else {
+        await api.post(`/stories/${id}/script`);
+        toast.success("Length updated — the script is being rewritten; review it before producing");
+      }
     } else {
       toast.success("Video style updated");
     }
