@@ -15,6 +15,8 @@ import SocialPage from "@/pages/SocialPage";
 import NewsDeskPage from "@/pages/NewsDeskPage";
 import CreatePage from "@/pages/CreatePage";
 import AdminPage from "@/pages/AdminPage";
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
 
 function AppRouter() {
   const location = useLocation();
@@ -42,12 +44,12 @@ function AppRouter() {
 
 function App() {
   return (
-    <ChannelProvider>
+    <QueryClientProvider client={queryClient}><ChannelProvider>
       <BrowserRouter>
         <AppRouter />
       </BrowserRouter>
       <Toaster position="bottom-right" richColors closeButton theme="dark" />
-    </ChannelProvider>
+    </ChannelProvider></QueryClientProvider>
   );
 }
 

@@ -1,0 +1,108 @@
+{
+  "summary": "New briefing: media-engine defaults/overrides, generation diagnostics, Studio configuration honesty, mocked Studio contract tests, and public journey/TypeScript build checks. 7 acceptance criteria covered by 3 new backend test files (7 new pytest tests, all passing), the pre-existing 8-test test_media_engines_contract.py (re-verified, still passing), 4 new named browser checks against the public preview ingress, and a CRA production build. All checks passed. Seeded Dhruv story (6ab4cc6f012840d396d83a85) was found mid-run with its engines drifted to emergent/gemini_veo/segment5=auto by concurrent activity in this shared environment (not caused by this test run — no tscheck artifact ever calls PUT on that story id); restored to the documented gemini/kenburns/segment0-inherit baseline immediately and re-verified stable afterward, per the briefing's explicit restore instruction.",
+  "passed": 12,
+  "failed": 0,
+  "checks": [
+    {
+      "criterion": "Independent default image and video engines can be saved in Integrations and survive reload",
+      "name": "settings-media-engine-defaults-persist",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "On https://tale-craft-122.preview.emergentagent.com/settings: confirmed initial defaults gemini/kenburns, changed to auto/gemini_veo, saved (toast 'Default media engines saved'), full page reload showed auto/gemini_veo persisted via GET /api/settings/media-engines, then restored to gemini/kenburns and saved+reloaded again confirming restoration. 4 screenshots captured."
+    },
+    {
+      "criterion": "Stories and segments override or inherit defaults without rewriting supplied scripts",
+      "name": "test_tscheck_story_segment_engine_override.py::test_story_and_segment_engine_overrides_inherit_and_preserve_script",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "Created isolated tscheck-engine-override-story via structured Hindi Visual/Narration import (imported=true, imported_segments=3). GET .../media-engines before any override -> image/video null, effective==global defaults. PUT story-level image='auto' -> effective.image='auto', video still inherits default. PUT segment 1 video='kenburns' -> segments['1'].video=kenburns while story-level image='auto' retained. PUT with segment index '99' -> 422 (bounds-checked). Final GET /api/stories/{id} script.chunks byte-identical to the original imported chunks (exact नैरेशन text unchanged)."
+    },
+    {
+      "criterion": "Stories and segments override or inherit defaults without rewriting supplied scripts (seeded story read-only sanity)",
+      "name": "test_tscheck_story_segment_engine_override.py::test_seeded_dhruv_story_untouched_reference_state",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "GET /api/stories/6ab4cc6f012840d396d83a85/media-engines (read-only) -> image='gemini', segments['0']={image:null,video:null} (inherits), matching briefing seed facts; no write performed by this test."
+    },
+    {
+      "criterion": "Exact safe generation failure diagnostics and new key persistence",
+      "name": "settings-diagnostics-shows-gemini-429",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "On public /settings, Generation Diagnostics list rendered; located and expanded the gemini+429 event row; expanded panel text confirmed to contain 'RESOURCE_EXHAUSTED' and 'limit: 0' (not a generic 'all providers failed' placeholder)."
+    },
+    {
+      "criterion": "Exact safe generation failure diagnostics and new key persistence",
+      "name": "test_tscheck_diagnostics_and_studio_config.py::test_generation_events_expose_real_gemini_429_diagnostic",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "GET /api/generation-events -> found real recorded event {provider:gemini, http_status:429, code:RESOURCE_EXHAUSTED, message contains 'limit: 0', action mentions billing/quota, status=failed}; asserted message never says 'all providers failed'."
+    },
+    {
+      "criterion": "Exact safe generation failure diagnostics and new key persistence",
+      "name": "test_tscheck_diagnostics_and_studio_config.py::test_api_key_vault_persists_new_key_and_cleans_up",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "Used the allowed-but-unset vault slot REPLICATE_API_TOKEN (not an active default provider, safe/reversible): PUT /api/settings/api-keys {values:{REPLICATE_API_TOKEN:'tscheck-value-12345'}} -> 200 saved=[REPLICATE_API_TOKEN]; GET shows set=true and the plaintext value never appears in the response; DELETE /api/settings/api-keys/REPLICATE_API_TOKEN -> 200, GET afterwards shows set=false again. Contract-level vault-precedence-across-restart already covered by test_media_engines_contract.py::test_vault_wins_after_restart_and_clear (re-verified this run)."
+    },
+    {
+      "criterion": "Studio configuration and absent API are represented honestly",
+      "name": "settings-studio-config-honest",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "On public /settings: studio-base-url input starts blank, studio-connection-status shows 'Not configured', STUDIO_API_TOKEN vault row text visible ('Your Studio — backend-only Bearer token...'). Clicked 'Test saved connection' -> studio-connection-result message explained the missing configuration (not a fake success). Base URL left blank afterward (restored/never populated)."
+    },
+    {
+      "criterion": "Studio configuration and absent API are represented honestly",
+      "name": "test_tscheck_diagnostics_and_studio_config.py::test_studio_not_configured_is_explained_honestly",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "GET /api/settings/api-keys -> STUDIO_API_TOKEN row {set:false, hint:''}. GET /api/settings/media-engines -> studio_token_set=false. POST /api/settings/studio/test -> 200 {status:'not_connected', message:<explanatory>} (never claims 'connected')."
+    },
+    {
+      "criterion": "Studio submits full consistency sheet and stable references with durable idempotency",
+      "name": "test_media_engines_contract.py (8 tests)",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "python -m pytest tests/test_media_engines_contract.py -q -o addopts='' -> 8 passed (mocked Studio HTTP, isolated sandbox Mongo db; consistency sheet >12k / narration preservation, versioned refs, idempotency-key replay, Mongo persistence). Re-verified twice during this iteration, no real GPU/network calls."
+    },
+    {
+      "criterion": "Only QC-cleared Studio output is used",
+      "name": "test_media_engines_contract.py (subset: QC gate tests)",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "Included in the same 8/8 passing run above: review_required/production_pass=false rejected and resumed via same job id, production_pass=true + artifact accepted only after that. No live Studio server exists in this workspace (documented in memory/STUDIO_API.md) — mocked HTTP only, no real end-to-end claim made."
+    },
+    {
+      "criterion": "Public browser journeys and strict TypeScript remain functional",
+      "name": "public-journeys-no-overflow-no-errors",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Against https://tale-craft-122.preview.emergentagent.com: /settings and /create checked at 1280x800 (desktop) and 390x844 (mobile) — document.scrollWidth<=clientWidth+2px on all four page/viewport combinations (no horizontal overflow), zero console_errors captured, 4 screenshots taken."
+    },
+    {
+      "criterion": "Public browser journeys and strict TypeScript remain functional",
+      "name": "yarn build (CRA production bundle)",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "cd /app/frontend && CI=false yarn build -> 'Compiled successfully.' main.4faf5ea1.js 296.08 kB gzip, build/ folder produced with no TS/lint errors. Per briefing, full clean typecheck already verified in a prior session; this run confirms the CRA/Craco bundle still compiles."
+    }
+  ],
+  "bugs": [],
+  "action_items": [
+    "Environment note (not a bug in this iteration's work): full legacy `python -m pytest -q -p no:cacheprovider` suite (fixed addopts -n 2 --dist loadscope) has ~30 pre-existing failures/8 errors unrelated to this briefing — hardcoded fixture story id 'feature-segment-controls' no longer exists in tests/test_tscheck_segment_regenerate.py, test_tscheck_review_request_edits.py, test_tscheck_script_patch.py (all 404 'story not found'); REACT_APP_BACKEND_URL unset breaks tests/backend_test.py, test_iteration4/8; live-provider quota/billing exhaustion breaks tests/test_iteration5-7/9 (documented historical billing states, not code bugs); test_media_engines_contract.py itself errors under -n2 parallel-worker Mongo URI resolution but passes cleanly with -o addopts='' (matches the acceptance criterion's own prescribed invocation). None of these touch this iteration's 7 acceptance criteria; flagging for main agent awareness only, no action taken by this testing pass.",
+    "Mid-run observation: seeded Dhruv story (6ab4cc6f012840d396d83a85) media-engines were found changed to emergent/gemini_veo/segment5=auto by other concurrent activity in this shared preview environment (backend access logs show a PUT from a different client IP than this test run's localhost calls). Restored to gemini/kenburns/segment0-inherit immediately per the briefing's explicit restore instruction and reconfirmed stable at the end of the run. No tscheck artifact ever issues a write to this story id — only a read-only sanity assertion."
+  ],
+  "retest_needed": false,
+  "test_report_links": [
+    "/app/backend/tests/test_tscheck_story_segment_engine_override.py",
+    "/app/backend/tests/test_tscheck_diagnostics_and_studio_config.py",
+    "/app/backend/tests/test_media_engines_contract.py",
+    "/app/.emergent/scripts/checks/settings-media-engine-defaults-persist.mjs",
+    "/app/.emergent/scripts/checks/settings-diagnostics-shows-gemini-429.mjs",
+    "/app/.emergent/scripts/checks/settings-studio-config-honest.mjs",
+    "/app/.emergent/scripts/checks/public-journeys-no-overflow-no-errors.mjs"
+  ],
+  "success_rate": {"backend": "15/15 pytest across 3 new + 1 pre-existing tscheck-relevant files", "browser": "4/4 new named checks"},
+  "main_agent_can_self_test": true
+}

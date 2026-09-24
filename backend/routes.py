@@ -634,13 +634,13 @@ async def engagement_sync():
 ALLOWED_VAULT_KEYS = {"OPENAI_API_KEY", "GEMINI_API_KEY", "EMERGENT_LLM_KEY", "FAL_KEY", "HF_TOKEN",
                       "REPLICATE_API_TOKEN", "PEXELS_API_KEY", "STABILITY_API_KEY", "YOUTUBE_CLIENT_ID",
                       "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN", "INSTAGRAM_ACCESS_TOKEN",
-                      "INSTAGRAM_USER_ID"}
+                      "INSTAGRAM_USER_ID", "STUDIO_API_TOKEN"}
 
 
 @router.get("/settings/api-keys")
 async def get_api_keys():
     return {k: {"set": bool((os.environ.get(k) or "").strip()),
-                "hint": (os.environ.get(k, "")[:6] + "…") if (os.environ.get(k, "") or "").strip() else ""}
+                "hint": "configured" if (os.environ.get(k, "") or "").strip() else ""}
             for k in sorted(ALLOWED_VAULT_KEYS)}
 
 
@@ -664,6 +664,8 @@ async def save_api_keys(body: KeysBody):
             vals[k] = os.environ[k]
         await db.settings.update_one({"key": "api_keys"},
                                      {"$set": {"values": vals, "updated_at": utcnow()}}, upsert=True)
+        from services.generation import reset_provider_health
+        reset_provider_health()
         if "INSTAGRAM_ACCESS_TOKEN" in saved or "INSTAGRAM_USER_ID" in saved:
             social.set_ig_creds(os.environ.get("INSTAGRAM_ACCESS_TOKEN", ""),
                                 os.environ.get("INSTAGRAM_USER_ID", ""), "vault")
@@ -676,7 +678,9 @@ async def delete_api_key(name: str):
     if name not in ALLOWED_VAULT_KEYS:
         raise HTTPException(400, "unknown key")
     os.environ[name] = ""
-    await db.settings.update_one({"key": "api_keys"}, {"$unset": {f"values.{name}": ""}})
+    await db.settings.update_one({"key": "api_keys"}, {"$set": {f"values.{name}": ""}}, upsert=True)
+    from services.generation import reset_provider_health
+    reset_provider_health()
     if name in ("INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_USER_ID"):
         social.set_ig_creds(os.environ.get("INSTAGRAM_ACCESS_TOKEN", ""),
                             os.environ.get("INSTAGRAM_USER_ID", ""), "vault")

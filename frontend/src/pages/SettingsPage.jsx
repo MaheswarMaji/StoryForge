@@ -6,8 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { EngineSettingsCard, GenerationDiagnostics } from '../components/MediaEngines';
 
 const KEY_LABELS = {
+  STUDIO_API_TOKEN: "Your Studio — backend-only Bearer token (add after installing its HTTP API)",
   OPENAI_API_KEY: "OpenAI (DALL·E / GPT Image 1 + LLM fallback)",
   GEMINI_API_KEY: "Google Gemini (Veo video, TTS, image, LLM)",
   EMERGENT_LLM_KEY: "Emergent Universal Key (LLM fallback)",
@@ -99,7 +101,7 @@ function ApiKeysVault({ keys, refreshKeys }) {
         ))}
       </div>
       <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-        Slide-mode image priority: OpenAI → Hugging Face FLUX.1-schnell → fal.ai. Clip-mode video priority: Gemini Veo → Replicate (Wan 2.1 / CogVideoX) → fal.ai. Free local TTS (Kokoro / XTTS v2 / gTTS) always runs first; procedural frames + Ken Burns motion are the never-fail fallback.
+        Keys are saved server-side and override environment defaults, including after restart. Saving a key resets provider cooldowns. Choose your image and video engines above; a configured key alone does not confirm billing or generation quota.
       </p>
     </div>
   );
@@ -290,6 +292,8 @@ export default function SettingsPage() {
         <p className="mt-1 text-sm text-slate-400">Every key is configurable here — saved server-side and applied instantly. The model router picks the best provider that still has quota.</p>
       </div>
 
+      <EngineSettingsCard />
+      <GenerationDiagnostics />
       <ApiKeysVault keys={keys} refreshKeys={refreshKeys} />
 
       <div className="grid gap-5 lg:grid-cols-2">

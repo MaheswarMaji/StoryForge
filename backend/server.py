@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -28,7 +28,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(router)
+api_router = APIRouter(prefix='/api')
+from routers.engines import router as engine_router
+api_router.include_router(engine_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
 MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
@@ -103,7 +105,9 @@ async def _load_key_vault():
     doc = await db.settings.find_one({"key": "api_keys"})
     n = 0
     for k, v in (doc or {}).get("values", {}).items():
-        if not (os.environ.get(k) or "").strip() and str(v).strip():
+        from routes import ALLOWED_VAULT_KEYS
+        if k in ALLOWED_VAULT_KEYS:
+            # Explicit vault values (including cleared keys) override stale environment defaults.
             os.environ[k] = str(v).strip()
             n += 1
     if n:
@@ -177,3 +181,9 @@ async def _periodic(job_type: str, default_hours: float, ready):
 @app.on_event("shutdown")
 async def shutdown():
     db.client.close()
+
+
+# The imported router already carries /api. Fold it in before the final include.
+for route in router.routes:
+    api_router.routes.append(route)
+app.include_router(api_router)

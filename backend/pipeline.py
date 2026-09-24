@@ -159,7 +159,7 @@ async def _render_segment(ctx, i, chunk, audio_urls, frame_urls, sem, setp, job_
                 "Do not redesign faces, clothing, palette, architecture, or illustration medium.",
                 frame, ref_image=ctx["char_path"], session=f"frame-{aid}-{i}",
                 query_hint=chunk.get("video_prompt") or chunk.get("visual") or "",
-                require_reference=True, quality_required=True)
+                require_reference=True, quality_required=True, segment_index=i)
             if res.get("provider") not in ("procedural",):
                 await _save_cost(aid, "image", media.IMAGE_PRICE)
 
@@ -182,7 +182,7 @@ async def _render_segment(ctx, i, chunk, audio_urls, frame_urls, sem, setp, job_
                 f"SCENE: {chunk.get('video_prompt', chunk.get('visual', ''))}. "
                 "Keep identical faces, hair, clothing, accessories, body proportions, palette, linework, lighting language and recurring locations.",
                 frame, MEDIA_ROOT / "tmp" / f"{aid}-raw-{i:02d}.mp4", dur + silence_pad,
-                preserve_reference=True)
+                preserve_reference=True, segment_index=i)
         hook_card = None
         if i == 0:
             hook_card = await asyncio.to_thread(
@@ -354,11 +354,11 @@ async def produce_video(story_id: str, setp, job_id=""):
     audio_urls, frame_urls = await _render_all_segments(ctx, setp, job_id)
     main, mixed, final = await _assemble_video(ctx, setp)
 
-    setp(72, "QA & metadata")
+    await setp(72, "QA & metadata")
     await set_story(stage="QA & metadata")
     qa, meta = await asyncio.gather(_qa_pass(story, channel), _metadata_pass(story, channel))
 
-    setp(86, "Thumbnail")
+    await setp(86, "Thumbnail")
     await set_story(stage="Thumbnail")
     await _thumbnail(story, channel, ctx, meta if isinstance(meta, dict) else {}, char_path)
 
@@ -430,8 +430,9 @@ async def regenerate_segment(story_id: str, index: int, setp, kind: str = "all")
     frame = MEDIA_ROOT / "frames" / aid / f"{index:02d}.png"
     char_path = MEDIA_ROOT / "char" / f"{aid}.png"
     if kind in {"all", "visual"} or not frame.exists():
-        if (story.get("character_sheet") or {}).get("visuals_stale"):
-            char_path.unlink(missing_ok=True)
+        if (story.get("character_sheet") or {}).get("visuals_stale") or not char_path.exists():
+            if (story.get("character_sheet") or {}).get("visuals_stale"):
+                char_path.unlink(missing_ok=True)
             await _character_sheet(
                 story_id, story, story.get("mode") or "slide",
                 (story.get("character_sheet") or {}).get("anchor", ""),
@@ -445,7 +446,7 @@ async def regenerate_segment(story_id: str, index: int, setp, kind: str = "all")
         )
         res = await router.image(visual_prompt, frame, ref_image=char_path if char_path.exists() else None,
                                  session=f"frame-{aid}-{index}-r", query_hint=chunk.get("visual"),
-                                 require_reference=True, quality_required=True)
+                                 require_reference=True, quality_required=True, segment_index=index)
         if res.get("provider") not in ("procedural",):
             await _save_cost(story_id, "image", media.IMAGE_PRICE)
 
@@ -464,7 +465,7 @@ async def regenerate_segment(story_id: str, index: int, setp, kind: str = "all")
             f"STRICT CONTINUITY LOCK: {(story.get('character_sheet') or {}).get('anchor', '')}. "
             f"ART DIRECTION: {channel.get('style_prefix') or story.get('visual_style', '')}. "
             f"SCENE: {chunk.get('video_prompt', chunk.get('visual', ''))}. Match the reference image exactly.",
-            frame, raw, dur, preserve_reference=True)
+            frame, raw, dur, preserve_reference=True, segment_index=index)
         if video_res.get("provider") == "kenburns":
             await media.make_segment_clip(frame, aud, cap, clip, chunk.get("camera", "zoom_in"), dur)
         else:

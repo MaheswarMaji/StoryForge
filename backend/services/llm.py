@@ -84,7 +84,7 @@ async def _stability_image(prompt: str, out_path, aspect: str = "9:16", model: s
     if not key:
         raise RuntimeError("STABILITY_API_KEY not set")
     endpoint = "core" if model == "core" else "sd3"
-    fields = {"prompt": prompt[:1900], "output_format": "png", "aspect_ratio": aspect}
+    fields = {"prompt": prompt, "output_format": "png", "aspect_ratio": aspect}
     if model != "core":
         fields["model"] = model
     r = await asyncio.to_thread(
@@ -97,7 +97,8 @@ async def _stability_image(prompt: str, out_path, aspect: str = "9:16", model: s
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         Path(out_path).write_bytes(r.content)
         return True
-    raise RuntimeError(f"stability {endpoint}: {r.status_code} {r.text[:120]}")
+    from services.generation import response_failure
+    raise response_failure(r, f'stability-{endpoint}')
 
 
 async def _hf_json(system: str, prompt: str):
@@ -176,4 +177,5 @@ async def ask_json(system: str, prompt: str, session: str = "job", retries: int 
             last_err = e
             print(f"[llm] hf qwen chain failed: {str(e)[:120]}", flush=True)
 
-    raise ValueError(f"LLM call failed: {last_err}")
+    from services.generation import redact
+    raise ValueError(f"LLM call failed: {redact(last_err) or type(last_err).__name__}. Check provider diagnostics and configured text-model quota.")

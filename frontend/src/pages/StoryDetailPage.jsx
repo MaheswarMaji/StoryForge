@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { StoryEngineControls, GenerationDiagnostics, StudioStoryPanel } from '../components/MediaEngines';
 
 const CAMERAS = { zoom_in: "Zoom In", zoom_out: "Zoom Out", pan_left: "Pan Left", pan_right: "Pan Right", static: "Static" };
 
@@ -249,7 +250,7 @@ function CharacterPanel({ story, media, busy, onSave }) {
   );
 }
 
-function SegmentRow({ chunk, i, media, editing, drafts, setDraft, regen, busy }) {
+function SegmentRow({ chunk, i, media, editing, drafts, setDraft, regen, busy, storyId }) {
   const bm = beatMeta(chunk.beat);
   return (
     <div key={chunk.chunk_id ?? `seg-${i}`} data-testid={`story-beat-${chunk.beat}`} className={`rise rounded-2xl border p-5 ${bm.cls}`}>
@@ -261,7 +262,8 @@ function SegmentRow({ chunk, i, media, editing, drafts, setDraft, regen, busy })
           <span className="rounded-full bg-black/30 px-3 py-1 text-[11px] text-slate-300">{chunk.emotion}</span>
         </span>
       </div>
-      <div className="grid gap-5 lg:grid-cols-5">
+      <StoryEngineControls storyId={storyId} segment={i} disabled={busy} />
+      <div className="mt-4 grid gap-5 lg:grid-cols-5">
         <div className="lg:col-span-3">
           {editing ? (
             <Textarea data-testid={`voiceover-edit-${i}`} rows={2}
@@ -511,7 +513,10 @@ export default function StoryDetailPage() {
     <div className="mx-auto max-w-7xl space-y-8 pb-16">
       <StoryHeader story={story} channel={channel} chunks={chunks} busy={busy} genScript={genScript} produce={produce} />
 
-      {story.error && <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-sm text-red-300">{story.error}</div>}
+      {story.error && <div data-testid="story-generation-error" className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-sm text-red-300">{story.error}</div>}
+      <StoryEngineControls storyId={id} disabled={busy || story.status === 'rendering'} />
+      <GenerationDiagnostics storyId={id} />
+      <StudioStoryPanel storyId={id} />
 
       <PipelineTracker story={story} stageIdx={stageIdx} onStop={stopRender} />
 
@@ -546,7 +551,7 @@ export default function StoryDetailPage() {
             </div>
             {chunks.map((c, i) => (
               <SegmentRow key={c.chunk_id ?? `seg-${i}`} chunk={c} i={i} media={media}
-                editing={editing} drafts={drafts} setDraft={setDraft} regen={regen} busy={busy} />
+                editing={editing} drafts={drafts} setDraft={setDraft} regen={regen} busy={busy || story.status === 'rendering'} storyId={id} />
             ))}
           </div>
         </>

@@ -26,3 +26,16 @@ StoryForge is an AI-powered mythology and folk-story video factory imported from
 ## Credentials
 
 No seeded test accounts or static credentials are present in the imported repository.
+
+## Selectable media engines and Studio connector (current)
+- Existing CRA/Craco app retained. New frontend code is strict TypeScript; `yarn typecheck` checks it, `yarn build` uses Craco. Legacy JS pages remain. Same-origin `/api` typed helpers and a single TanStack Query provider are now shared by new controls.
+- Integrations has independent image/video defaults (Gemini direct key / local Ken Burns initially). Stories and individual zero-based segments can override either or inherit. Explicit choices do not silently fall back; Auto image = Gemini then Emergent; Auto video = Veo then local motion. Engines without reference-editing support fail clearly for locked frames.
+- Settings vault wins over stale environment values on restart, including explicit cleared keys. Saving/clearing resets provider cooldowns. Keys are never returned, only configured flags. Existing optional Google auth is unchanged; story/settings paths remain usable without login as in the imported app.
+- New Mongo collections: story_engines (image/video, per-segment overrides, Studio versioned character/reference mappings); generation_events (provider/model, stage/kind, segment, HTTP code, safe error text, remediation and timestamp); studio_jobs (durable idempotency key, payload hash, full request, remote ID, status and QC); studio_assets and studio_characters for remote versioned registrations.
+- New API module routers/engines.py is included under api_router `/api` in server.py. Pydantic contracts in engine_models.py mirror frontend/src/lib/engine-types.ts.
+- Gemini requests use direct saved Gemini keys and supported image-preview model with full prompts/references, actionable HTTP/safety errors, no wasteful quota retries or shared text circuit blocking image attempts. Key check is non-generative; Image test is explicit and potentially billable.
+- Diagnostics retains attempts including fallback errors and pipeline failures. Historical generic errors cannot be reconstructed. Generation engines retain complete character bibles (including storyboard/SDK prompt paths).
+- Google Veo now receives the approved frame; local Ken Burns remains an explicitly labelled non-generative choice.
+- Studio: configurable service URL, backend-only STUDIO_API_TOKEN, capabilities check, reference upload/character registration, async submit/poll/cancel, authenticated artifact download, retained IDs for recovery, full bible/scene/LoRA/reference payload. Only `succeeded` + strict `production_pass: true` + a non-preview production artifact may enter the final video. QC review does not auto-approve. See STUDIO_API.md for provisional contract extensions.
+- External blockers: direct live probe of newly saved Gemini key returned HTTP 429 RESOURCE_EXHAUSTED with `generate_content_free_tier_requests, limit: 0`. Google project billing/image quota must be enabled by owner. Studio HTTP API is NOT LIVE, and no actual base URL/token has been provided. Adapter implementation is not a remote server installation. Live Studio generation remains unverified; automated contract tests use MOCKED Studio HTTP responses.
+- Public preview: https://tale-craft-122.preview.emergentagent.com

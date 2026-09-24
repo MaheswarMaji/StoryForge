@@ -72,6 +72,8 @@ async def _claim_next(idx: int):
 async def _execute_job(job, idx):
     """Run one claimed job to completion and record its terminal status."""
     job_id = job["_id"]
+    from services.generation import generation_context, record_event, redact
+    context_token = generation_context.set({'story_id': job.get('ref_id', ''), 'job_id': job_id})
     try:
         HEARTBEAT["active"] += 1
         HEARTBEAT["last_beat"] = now()
@@ -92,15 +94,18 @@ async def _execute_job(job, idx):
                 {"_id": job["ref_id"], "status": "rendering"},
                 {"$set": {"status": "script_ready", "stage": "Stopped by user", "error": ""}})
     except Exception as e:
-        log.exception("job %s failed", job_id)
-        await _update(job_id, status="failed", error=str(e)[:900], finished_at=now())
+        message = redact(e) or f'{type(e).__name__}: no provider details were returned'
+        log.error("job %s failed: %s", job_id, message)
+        await record_event(job['type'], 'pipeline', 'failed', error=e, segment=(job.get('payload') or {}).get('index'))
+        await _update(job_id, status="failed", error=message, finished_at=now())
         coll = FAILURE_COLLECTION.get(job["type"])
         if coll and job.get("ref_id") and job["ref_id"] != "system":
             await db[coll].update_one(
                 {"_id": job["ref_id"]},
-                {"$set": {"status": "failed", "error": str(e)[:500]}},
+                {"$set": {"status": "failed", "error": message}},
             )
     finally:
+        generation_context.reset(context_token)
         HEARTBEAT["active"] = max(0, HEARTBEAT["active"] - 1)
         HEARTBEAT["last_beat"] = now()
 

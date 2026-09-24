@@ -11,7 +11,7 @@ from services.llm import parse_json
 
 BASE = "https://generativelanguage.googleapis.com/v1beta"
 TEXT_MODELS = ["gemini-3.5-flash", "gemini-3-flash-preview", "gemini-flash-latest"]
-IMAGE_MODELS = ["gemini-3.1-flash-image", "gemini-2.5-flash-image"]
+IMAGE_MODELS = ["gemini-3.1-flash-image-preview", "gemini-2.5-flash-image"]
 TTS_MODEL = "gemini-2.5-flash-preview-tts"
 RATE_PER_MIN = 8  # conservative free-tier budget shared by text+tts+image
 
@@ -107,32 +107,38 @@ async def chat_json(system: str, prompt: str, session: str = "job", retries: int
 
 
 async def gen_image(prompt: str, ref_image_bytes: bytes = None) -> bytes:
+    from services.generation import ProviderFailure, response_failure
+    if not gemini_key():
+        raise ProviderFailure('GEMINI_API_KEY is not configured', code='NOT_CONFIGURED')
     last = None
     for model in IMAGE_MODELS:
         parts = [{"text": prompt}]
         if ref_image_bytes:
-            parts.append({"inlineData": {"mime_type": "image/png",
+            parts.append({"inlineData": {"mimeType": "image/png",
                                          "data": base64.b64encode(ref_image_bytes).decode()}})
         async with httpx.AsyncClient(timeout=240) as client:
-            for attempt in range(4):
+            for attempt in range(1):
                 await _respect_rate()
                 r = await client.post(
-                    f"{BASE}/models/{model}:generateContent?key={gemini_key()}",
+                    f"{BASE}/models/{model}:generateContent", headers={'x-goog-api-key': gemini_key()},
                     json={"contents": [{"parts": parts}],
-                          "generationConfig": {"responseModalities": ["IMAGE"]}})
+                          "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}})
                 if r.status_code == 200:
-                    cparts = r.json()["candidates"][0]["content"]["parts"]
+                    result = r.json()
+                    candidates = result.get('candidates') or [{}]
+                    cparts = candidates[0].get('content', {}).get('parts', [])
                     for p in cparts:
                         if "inlineData" in p:
                             return base64.b64decode(p["inlineData"]["data"])
-                    last = "no image part in response"
-                    break
-                last = f"{model}: {r.status_code} {r.text[:120]}"
-                if r.status_code == 429:
-                    await asyncio.sleep(_retry_wait(r.text, attempt))
-                    continue
+                    reason = result.get('promptFeedback', {}).get('blockReason') or candidates[0].get('finishReason') or 'NO_IMAGE'
+                    raise ProviderFailure(f'Gemini returned no image. Reason: {reason}. ' + ' '.join(p.get('text', '') for p in cparts), model=model, code=reason,
+                                          action='Review safety feedback and the supplied prompt; do not keep retrying unchanged.')
+                last = response_failure(r, model)
+                if r.status_code not in (404,):
+                    # Auth/billing/quota failures will not be repaired by repeatedly trying models.
+                    raise last
                 break
-    raise RuntimeError(f"gemini image failed: {last}")
+    raise last or ProviderFailure('Gemini returned no image', code='NO_IMAGE')
 
 
 async def tts(text: str, voice: str, out_wav, direction: str = None) -> float:

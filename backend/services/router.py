@@ -69,7 +69,7 @@ def status() -> dict:
             "pexels": {"key": bool(_key("PEXELS_API_KEY")), "healthy": True},
             "pexels_video": {"key": bool(_key("PEXELS_API_KEY")), "healthy": True},
         },
-        "notes": "Slide mode image priority: OpenAI → Hugging Face FLUX.1-schnell → fal.ai. Clip mode video priority: Gemini Veo → Replicate (Wan 2.1) → fal.ai. Free local fallbacks (Kokoro/XTTS/gTTS voice, procedural frames + Ken Burns) always available. Add HF_TOKEN / FAL_KEY / REPLICATE_API_TOKEN in Settings → API Keys.",
+        "notes": "Media Engines controls image/video defaults and story overrides. Only Auto permits fallback. Reference-incompatible engines are blocked for locked frames. A configured key does not guarantee quota. Ken Burns is local motion, not generative video.",
     }
 
 
@@ -95,7 +95,7 @@ HUMANIZE_PROVIDERS = {"kokoro", "xtts", "gtts", "openai"}
 
 async def tts(text: str, voice_spec: str, lang_hint: str, out_path: Path,
               direction: str = None, expressive: bool = False, speed: float = 1.0) -> dict:
-    from services import gemini
+    from services import gemini, generation
     from services.media import ffprobe_duration, humanize_audio
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,6 +107,7 @@ async def tts(text: str, voice_spec: str, lang_hint: str, out_path: Path,
             dur = await humanize_audio(out_path, out_path, direction, speed=speed)
         return {"provider": provider, "duration": dur}
 
+    errors = []
     for provider in chain("tts"):
         if not available(provider):
             continue
@@ -157,9 +158,10 @@ async def tts(text: str, voice_spec: str, lang_hint: str, out_path: Path,
                 return await finish(provider, dur)
         except Exception as e:
             _fail(provider)
-            print(f"[router] tts:{provider} failed -> next: {str(e)[:110]}", flush=True)
+            event = await generation.record_event('voice', provider, 'failed', error=e)
+            errors.append(f"{provider}: {event['message']}")
 
-    raise RuntimeError("all TTS providers failed")
+    raise generation.ProviderFailure('Voice generation failed — ' + '\n'.join(errors), code='TTS_GENERATION_FAILED')
 
 
 async def _kokoro(text: str, voice: str, out_path: Path) -> float:
@@ -256,7 +258,7 @@ async def _hf_image(prompt: str) -> bytes:
     async with httpx.AsyncClient(timeout=120) as client:
         for url in urls:
             r = await client.post(url, headers={"Authorization": f"Bearer {token}"},
-                                  json={"inputs": prompt[:800]})
+                                  json={"inputs": prompt})
             if r.status_code == 200 and r.content[:3] in (b"\x89PN", b"\xff\xd8\xff"):
                 return r.content
             last = f"{r.status_code} {r.text[:100]}"
@@ -275,7 +277,7 @@ async def _pexels_video(prompt: str) -> bytes:
     return tmp.read_bytes()
 
 
-async def _veo_video(prompt: str, duration: float) -> bytes:
+async def _veo_video(prompt: str, duration: float, ref_image: Path = None) -> bytes:
     """Gemini API Veo (paid tier) — LRO submit + poll + download; falls through on quota errors."""
     import httpx
 
@@ -284,108 +286,102 @@ async def _veo_video(prompt: str, duration: float) -> bytes:
         raise RuntimeError("GEMINI_API_KEY not set")
     base = "https://generativelanguage.googleapis.com/v1beta"
     headers = {"x-goog-api-key": key}
-    models = ["veo-3.1-fast-generate-preview", "veo-3.0-generate-001", "veo-3.0-fast-generate-001"]
+    models = ["veo-3.1-fast-generate-preview"]
     last = None
     async with httpx.AsyncClient(timeout=120) as client:
         for model in models:
             try:
+                import base64
+                from services.generation import response_failure, ProviderFailure
+                instance = {'prompt': prompt}
+                if ref_image and Path(ref_image).exists():
+                    instance['image'] = {'bytesBase64Encoded': base64.b64encode(Path(ref_image).read_bytes()).decode(), 'mimeType': 'image/png'}
                 r = await client.post(
                     f"{base}/models/{model}:predictLongRunning", headers=headers,
-                    json={"instances": [{"prompt": prompt[:1500]}],
+                    json={"instances": [instance],
                           "parameters": {"sampleCount": 1, "aspectRatio": "9:16"}})
-                r.raise_for_status()
+                if r.status_code >= 400:
+                    raise response_failure(r, model)
                 op = r.json().get("name")
                 if not op:
                     raise RuntimeError("no operation name")
                 for _ in range(80):
                     s = await client.get(f"{base}/{op}", headers=headers)
+                    if s.status_code >= 400:
+                        raise response_failure(s, model)
                     d = s.json()
                     if d.get("error"):
-                        raise RuntimeError(str(d["error"])[:140])
+                        raise ProviderFailure(str(d['error']), model=model, code='VEO_OPERATION_FAILED')
                     if d.get("done"):
                         uri = (d.get("response", {}).get("generateVideoResponse", {})
                                .get("generatedSamples") or [{}])[0].get("video", {}).get("uri")
                         if not uri:
                             raise RuntimeError("veo: no video uri")
-                        dl = await client.get(uri, headers=headers, timeout=300, follow_redirects=True)
+                        from urllib.parse import urlparse
+                        parsed = urlparse(uri)
+                        if parsed.scheme != 'https' or not (parsed.hostname or '').endswith('.googleapis.com'):
+                            raise ProviderFailure('Unexpected Veo download host; key was not sent.', code='UNTRUSTED_DOWNLOAD')
+                        dl = await client.get(uri, headers=headers, timeout=300, follow_redirects=False)
                         dl.raise_for_status()
                         return dl.content
                     await asyncio.sleep(8)
                 raise RuntimeError("veo timeout")
-            except httpx.HTTPStatusError as e:
-                last = f"{model}: {e.response.status_code}"
-                continue
-            except Exception as e:
-                last = f"{model}: {str(e)[:100]}"
-                continue
+            except Exception:
+                raise
     raise RuntimeError(f"veo exhausted: {last}")
 
 
 async def image(prompt: str, out_path: Path, ref_image: Path = None, session: str = "img",
                 query_hint: str = None, require_reference: bool = False,
-                quality_required: bool = False) -> dict:
-    from services import imagegen
-
-    for provider in chain("image"):
-        if not available(provider):
-            continue
-        if require_reference and provider not in ("openai", "emergent", "gemini"):
-            continue
-        if quality_required and provider in ("pexels", "procedural"):
-            continue
+                quality_required: bool = False, segment_index: int = None) -> dict:
+    from services import imagegen, gemini, generation
+    from job_queue import JobCancelled
+    selected = await generation.resolve('image', segment_index)
+    providers = ['gemini', 'emergent'] if selected == 'auto' else [selected]
+    errors = []
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    for provider in providers:
         try:
-            if provider == "fal_flux":
-                data = await _fal_image(prompt)
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_bytes(data)
-                _ok(provider)
-                return {"provider": provider}
-            if provider == "replicate_flux":
-                data = await _replicate_image(prompt)
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_bytes(data)
-                _ok(provider)
-                return {"provider": provider}
-            if provider == "hf_flux":
-                data = await _hf_image(prompt)
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_bytes(data)
-                _ok(provider)
-                return {"provider": provider}
-            if provider == "qwen_local":
-                data = await _qwen_image(prompt, ref_image)
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_bytes(data)
-                _ok(provider)
-                return {"provider": provider}
-            if provider == "stability":
+            if require_reference and (not ref_image or not Path(ref_image).exists()):
+                raise generation.ProviderFailure('An approved character reference is required before this frame can be generated.', code='REFERENCE_MISSING')
+            if require_reference and provider not in ('gemini', 'emergent', 'studio'):
+                raise generation.ProviderFailure(f'{provider} cannot edit reference images in this app. Select Gemini, Emergent or Studio to preserve identity.', code='REFERENCE_UNSUPPORTED')
+            if provider == 'studio':
+                from services.studio import generate
+                result = await generate('image', prompt, out_path, await generation.settings(), ref_image, segment_index)
+            elif provider == 'gemini':
+                out_path.write_bytes(await gemini.gen_image(prompt, imagegen._ref_bytes(ref_image)))
+                result = {'provider': 'gemini', 'ai': True}
+            elif provider == 'emergent':
+                if not gemini.emergent_key():
+                    raise generation.ProviderFailure('EMERGENT_LLM_KEY is not configured', code='NOT_CONFIGURED')
+                await asyncio.wait_for(imagegen._gen_gemini_proxy(gemini.emergent_key(), prompt, out_path, ref_image, session), timeout=240)
+                result = {'provider': 'emergent', 'ai': True}
+            elif provider == 'openai':
+                if not gemini.openai_key():
+                    raise generation.ProviderFailure('OPENAI_API_KEY is not configured', code='NOT_CONFIGURED')
+                await asyncio.wait_for(imagegen._gen_openai_image(gemini.openai_key(), prompt, out_path), timeout=240)
+                result = {'provider': 'openai', 'ai': True}
+            elif provider == 'stability':
                 from services.llm import _stability_image
                 if not await _stability_image(prompt, out_path):
-                    raise RuntimeError("stability: no image")
-                _ok(provider)
-                return {"provider": provider}
-            if provider == "pexels":
-                from services import pexels
-                if not await pexels.fetch_photo(query_hint or prompt, out_path):
-                    raise RuntimeError("pexels: no match")
-                _ok(provider)
-                return {"provider": provider}
-            if provider == "procedural":
-                await imagegen.generate_image(prompt, out_path, ref_image=ref_image, session=session,
-                                              require_reference=require_reference)
-                return {"provider": "procedural", "ai": False}
-            if provider in ("gemini", "emergent", "openai"):
-                ai = await imagegen.generate_image(prompt, out_path, ref_image=ref_image, session=session,
-                                                   require_reference=require_reference)
-                if ai:
-                    return {"provider": provider, "ai": True}
-                # imagegen fell through to its local fallback — keep trying the remaining
-                # providers in the chain (pexels etc.) so real imagery still wins
-                continue
-        except Exception as e:
-            _fail(provider)
-            print(f"[router] image:{provider} failed -> next: {str(e)[:110]}", flush=True)
-    raise RuntimeError("all image providers failed")
+                    raise generation.ProviderFailure('Stability returned no image. Check key and billing.', code='NO_IMAGE')
+                result = {'provider': 'stability', 'ai': True}
+            elif provider in ('fal_flux', 'replicate_flux', 'hf_flux'):
+                fn = {'fal_flux': _fal_image, 'replicate_flux': _replicate_image, 'hf_flux': _hf_image}[provider]
+                out_path.write_bytes(await fn(prompt))
+                result = {'provider': provider, 'ai': True}
+            else:
+                raise generation.ProviderFailure(f'Unsupported image engine: {provider}', code='UNSUPPORTED_ENGINE')
+            await generation.record_event('image', provider, 'succeeded', 'Image generated with the selected engine.', segment=segment_index)
+            return result
+        except JobCancelled:
+            raise
+        except Exception as error:
+            event = await generation.record_event('image', provider, 'failed', error=error, segment=segment_index)
+            errors.append(f"{provider}: {event['code']} {event['message']} {event['action']}")
+    raise generation.ProviderFailure('Image generation failed — ' + '\n'.join(errors), code='IMAGE_GENERATION_FAILED')
 
 
 async def _fal_image(prompt: str) -> bytes:
@@ -406,7 +402,7 @@ async def _fal_image(prompt: str) -> bytes:
                 r = await client.post(
                     f"https://queue.fal.run/{endpoint}",
                     headers={"Authorization": f"Key {key}", "Content-Type": "application/json"},
-                    json={"prompt": prompt[:1800], "num_images": 1,
+                    json={"prompt": prompt, "num_images": 1,
                           "image_size": {"width": 768, "height": 1344}},
                 )
                 r.raise_for_status()
@@ -447,7 +443,7 @@ async def _replicate_image(prompt: str) -> bytes:
         r = await client.post(
             f"https://api.replicate.com/v1/models/{model}/predictions",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"input": {"prompt": prompt[:1800], "aspect_ratio": "9:16", "output_format": "png"}},
+            json={"input": {"prompt": prompt, "aspect_ratio": "9:16", "output_format": "png"}},
         )
         r.raise_for_status()
         job = r.json()
@@ -469,45 +465,36 @@ async def _replicate_image(prompt: str) -> bytes:
 
 # ---------------- VIDEO ----------------
 async def video(prompt: str, ref_image: Path, out_path: Path, duration: float = 10.0,
-                preserve_reference: bool = False) -> dict:
-    # Text-to-video providers in this app do not consume ref_image, so they can redesign faces and style.
-    # For a locked series, animate the approved continuity frame locally instead of accepting that drift.
-    if preserve_reference and ref_image and Path(ref_image).exists():
-        return {"provider": "kenburns", "continuity_locked": True}
-    for provider in chain("video"):
-        if not available(provider):
-            continue
+                preserve_reference: bool = False, segment_index: int = None) -> dict:
+    from services import generation
+    from job_queue import JobCancelled
+    selected = await generation.resolve('video', segment_index)
+    providers = ['gemini_veo', 'kenburns'] if selected == 'auto' else [selected]
+    errors = []
+    for provider in providers:
         try:
-            if provider == "gemini_veo":
-                data = await asyncio.wait_for(_veo_video(prompt, duration), timeout=45)
+            if preserve_reference and (not ref_image or not Path(ref_image).exists()):
+                raise generation.ProviderFailure('Approved scene image is missing.', code='REFERENCE_MISSING')
+            if provider == 'kenburns':
+                result = {'provider': 'kenburns', 'continuity_locked': True}
+            elif provider == 'studio':
+                from services.studio import generate
+                result = await generate('video', prompt, out_path, await generation.settings(), ref_image, segment_index, duration)
+            elif provider == 'gemini_veo':
+                data = await _veo_video(prompt, duration, ref_image)
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_bytes(data)
-                _ok(provider)
-                return {"provider": provider}
-            if provider == "fal_wan":
-                data = await _fal_video(prompt, duration)
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_bytes(data)
-                _ok(provider)
-                return {"provider": provider}
-            if provider == "replicate_wan":
-                data = await _replicate_video(prompt, duration)
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_bytes(data)
-                _ok(provider)
-                return {"provider": provider}
-            if provider == "pexels_video":
-                data = await _pexels_video(prompt)
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_bytes(data)
-                _ok(provider)
-                return {"provider": provider}
-            if provider == "kenburns":
-                return {"provider": "kenburns"}  # local motion renderer in media.py
-        except Exception as e:
-            _fail(provider)
-            print(f"[router] video:{provider} failed -> next: {str(e)[:110]}", flush=True)
-    return {"provider": "kenburns"}
+                result = {'provider': 'gemini_veo'}
+            else:
+                raise generation.ProviderFailure(f'Unsupported video engine: {provider}', code='UNSUPPORTED_ENGINE')
+            await generation.record_event('video', provider, 'succeeded', 'Selected video engine completed.' if provider != 'kenburns' else 'Using local Ken Burns motion (not generative AI).', segment=segment_index)
+            return result
+        except JobCancelled:
+            raise
+        except Exception as error:
+            event = await generation.record_event('video', provider, 'failed', error=error, segment=segment_index)
+            errors.append(f"{provider}: {event['code']} {event['message']} {event['action']}")
+    raise generation.ProviderFailure('Video generation failed — ' + '\n'.join(errors), code='VIDEO_GENERATION_FAILED')
 
 
 async def _fal_video(prompt: str, duration: float) -> bytes:

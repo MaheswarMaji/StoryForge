@@ -94,9 +94,9 @@ async def _gen_gemini_proxy(key, prompt, out_path, ref_image, session):
         ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
         if ref_image and Path(ref_image).exists():
             b64 = base64.b64encode(Path(ref_image).read_bytes()).decode()
-            msg = UserMessage(text=prompt[:10000], file_contents=[ImageContent(b64)])
+            msg = UserMessage(text=prompt, file_contents=[ImageContent(b64)])
         else:
-            msg = UserMessage(text=prompt[:10000])
+            msg = UserMessage(text=prompt)
         _, images = await chat.send_message_multimodal_response(msg)
         if not images:
             raise RuntimeError("no images")

@@ -128,7 +128,7 @@ async def generate_storyboard(segments, out_dir: Path, style: str, anchor: str, 
     titles = []
     for s in segments:
         t = (s.get("visual") or s.get("video_prompt") or s.get("voiceover", "")).strip()
-        titles.append(t[:260] or "slide")
+        titles.append(t or "slide")
 
     prompt = (
         f"STRICT CHARACTER, SETTING AND STYLE CONTINUITY BIBLE — obey in every panel: {anchor} "
@@ -138,17 +138,17 @@ async def generate_storyboard(segments, out_dir: Path, style: str, anchor: str, 
         "Recurring locations must keep the same architecture and props. Use a unified deep-indigo and saffron palette, fine miniature-painting linework, "
         "rich natural pigments, subtle gold leaf, layered flat perspective, devotional atmosphere and cinematic lighting where requested. "
         + " ".join(
-            f"Panel {i + 1}, row-major scene: {t[:360]}."
+            f"Panel {i + 1}, row-major scene: {t}."
             for i, t in enumerate(titles[: rows * cols]))
         + " No captions, no title band, no letters, no numbered badges, no watermark, no photorealism, no 3D render, no style drift."
     )
 
     tmp = out_dir / "poster_ai.png"
     try:
-        await router.image(prompt[:10000], tmp, ref_image=ref_image, session="storyboard",
+        await router.image(prompt, tmp, ref_image=ref_image, session="storyboard",
                            require_reference=True, quality_required=True)
     except Exception as e:
-        raise RuntimeError(f"continuity-locked storyboard generation failed; retry when a reference-aware provider is available: {str(e)[:180]}") from e
+        raise RuntimeError(f"Continuity-locked storyboard generation failed: {e}") from e
     if tmp.exists():
         tmp.replace(poster)
         print("[storyboard] AI poster generated (1 API call)", flush=True)
